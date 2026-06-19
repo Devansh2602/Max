@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UTM — PO Invoice Generator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--bg:#f4f6f9;--card:#fff;--border:#dde1e7;--primary:#1a56db;--primary-dark:#1043b5;--text:#111827;--muted:#6b7280;--grey:#D9D9D9}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+header{background:var(--primary);color:#fff;padding:14px 28px}
+header h1{font-size:18px;font-weight:600}
+header p{opacity:.7;font-size:12px;margin-top:2px}
+.wrap{max-width:1100px;margin:0 auto;padding:22px 18px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px 22px;margin-bottom:18px}
+.card-title{font-size:15px;font-weight:600;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.drop{border:2px dashed var(--primary);border-radius:10px;padding:38px 20px;text-align:center;cursor:pointer;transition:background .2s}
+.drop:hover,.drop.over{background:#eef2ff}
+.drop .icon{font-size:44px;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;margin-bottom:14px}
+label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px;text-transform:uppercase}
+input,select,textarea{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--text);background:#f9fafb;outline:none}
+input:focus,textarea:focus{border-color:var(--primary)}
+.tabs{display:flex;gap:5px;flex-wrap:wrap}
+.tab{padding:7px 14px;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0;background:#eef;cursor:pointer;font-size:13px;font-weight:500}
+.tab.active{background:var(--card);border-bottom:1px solid var(--card);color:var(--primary);font-weight:700}
+.panel{display:none;border:1px solid var(--border);border-radius:0 8px 8px 8px;padding:16px 18px;background:var(--card)}
+.panel.active{display:block}
+.loc-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px;margin-bottom:12px}
+table.sz{width:100%;border-collapse:collapse;margin-top:8px}
+table.sz th{background:#f0f4ff;font-size:12px;font-weight:600;padding:5px 8px;text-align:center;border:1px solid var(--border)}
+table.sz td{padding:4px 7px;border:1px solid var(--border);text-align:center}
+table.sz input{width:80px;padding:4px 5px;border:1px solid var(--border);border-radius:4px;text-align:center;font-size:13px}
+.btn{padding:10px 22px;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;transition:background .2s}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-dark)}
+.btn-primary:disabled{background:#9db3e8;cursor:not-allowed}
+.status{padding:9px 13px;border-radius:7px;font-size:13px;margin-bottom:10px;display:none}
+.info{background:#e1effe;color:#1e429f;border:1px solid #c3ddfd}.ok{background:#def7ec;color:#03543f;border:1px solid #bcf0da}.err{background:#fde8e8;color:#9b1c1c;border:1px solid #f8b4b4}
+.spin{display:inline-block;width:13px;height:13px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:sp .6s linear infinite;vertical-align:middle;margin-right:5px}
+@keyframes sp{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<header>
+  <h1>UTM — PO Invoice &amp; Packing List Generator</h1>
+  <p>United Textile Mills Pvt. Ltd. &nbsp;|&nbsp; MAX / Lifestyle International &nbsp;|&nbsp; Runs entirely in your browser — no upload, no server</p>
+</header>
+<div class="wrap">
+
+<div class="card">
+  <div class="card-title">Step 1 — Upload MAX Purchase Order PDF</div>
+  <div class="drop" id="drop" onclick="document.getElementById('fi').click()">
+    <div class="icon">📄</div>
+    <strong>Click to choose PDF &nbsp;or&nbsp; drag &amp; drop</strong>
+    <p style="color:var(--muted);margin-top:5px">Supports MAX / Lifestyle International PO PDFs</p>
+  </div>
+  <input type="file" id="fi" accept=".pdf" style="display:none">
+  <div id="upSt" class="status"></div>
+</div>
+
+<div id="poCard" class="card" style="display:none">
+  <div class="card-title">Step 2 — Verify Parsed PO Data</div>
+  <div class="grid">
+    <div><label>PO Number</label><input id="poNum"></div>
+    <div><label>Order Date</label><input id="poDate"></div>
+    <div><label>Supplier GSTIN</label><input id="supGSTIN"></div>
+    <div><label>Unit Rate (₹)</label><input id="rate" type="number" step="0.01"></div>
+    <div><label>MRP (₹)</label><input id="mrp" type="number" step="0.01"></div>
+    <div><label>HSN Code</label><input id="hsn"></div>
+  </div>
+  <div class="grid">
+    <div><label>Style No.</label><input id="styleNo"></div>
+    <div><label>Item Description</label><input id="itemDesc"></div>
+    <div><label>Colour</label><input id="colour"></div>
+    <div><label>Prepack Ratio S:M:L:XL:XXL</label><input id="ratio" placeholder="2:2:2:1:1"></div>
+  </div>
+</div>
+
+<div id="setCard" class="card" style="display:none">
+  <div class="card-title">Step 3 — Packing Settings</div>
+  <div class="grid">
+    <div><label>Max PCS per Carton</label><input id="maxPcs" type="number" value="60" min="1"></div>
+    <div><label>Per-Piece Weight (kg)</label><input id="ppWt" type="number" value="0.1" step="0.01"></div>
+    <div><label>Box Tare Weight (kg)</label><input id="boxWt" type="number" value="1.5" step="0.01"></div>
+  </div>
+</div>
+
+<div id="locCard" style="display:none">
+  <div style="font-size:15px;font-weight:600;margin-bottom:10px">Step 4 — Invoice Details per Location</div>
+  <div class="tabs" id="tabBar"></div>
+  <div id="tabPanels"></div>
+</div>
+
+<div id="genCard" class="card" style="display:none">
+  <div id="genSt" class="status"></div>
+  <button class="btn btn-primary" id="genBtn" onclick="generate()">
+    ⚡ Generate Invoices &amp; Packing List
+  </button>
+  <span style="color:var(--muted);font-size:12px;margin-left:14px">Downloads a ZIP with 4 invoice .xlsx + 1 packing list .xlsx</span>
+</div>
+</div><!-- /wrap -->
+
+<script>
+// ─── PDF.js worker ───────────────────────────────────────
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ─── Constants ───────────────────────────────────────────
+const SUP = {
+  name:  'UNITED TEXTILE MILLS PVT.LTD',
+  addr1: 'Mumbai Office Adress - B-501, Dhanashree Heights,Bldg No - 42, B-Wing , Off Veera Desai Road, Andheri(West), Mumbai-400053',
+  addr2: 'Phone No:  022-26740919.    Email :info@unitedmill.com    GSTIN No : 27AAACU8888P1Z7,Udyog Aadhaar Number  : - MH19B0047413',
+  addr3: 'Vapi Office Adress -  Plot No-136/B, B1-7 ,1st Floor  GIDC-2nd Phase Vapi - 396195 Gujarat   Gst No -24AAACU8888P1ZD',
+  gstin: '27AAACU8888P1Z7',
+  from1: 'UNITED TEXTILE MILLS PVT LTD',
+  from2: 'Plot No-136/B, B1-7',
+  from3: '1st Floor, GIDC-2nd Phase,',
+  from4: 'District -Valsad, Gujarat - Vapi-396195'
+};
+const LIFESTYLE = 'LIFESTYLE INTERNATIONAL PVT. LTD.';
+const SIZES = ['PREPACK','S','M','L','XL','XXL'];
+const KNOWN_ADDR = {
+  '27AAACL2937J1ZE':['MAX BHIWANDI ANTARIKSH WAREHOUSE A-1,','ANTARIKSH LOGIDROME, VILL SAPE DIST. THANE BHIWANDI','MAHARASHTRA 421302'],
+  '09AAACL2937J1ZC':['KHASRA NO 875, VILLAGE GALAND PARGANA DASNA','TEHSIL HAPUR, GHAZIABAD','UTTAR PRADESH 201015'],
+  '29AAACL2937J1ZA':['SURVEY NO 125, 126-1 AND 126-2, NIDAGATTA VILLAGE','JADEGENHALLI HOBLI, HOSKOTE TALUK','BANGALORE, KARNATAKA 562114'],
+  '19AAACL2937J1ZB':['PLOT# R.S. AND L.R, 411, 412 AND 413, KHAINTAN NOS 2824 AND 2827','J.L # 7, MOUZA BHAGABATIPUR, SANKRAIL INDUSTRIAL PARK','HOWRAH, WEST BENGAL 711313']
+};
+const SHEET_NAMES = {'27AAACL2937J1ZE':'BHI','09AAACL2937J1ZC':'GAZI','29AAACL2937J1ZA':'SOUTH','19AAACL2937J1ZB':'KOL'};
+const LOC_DISPLAY = {'27AAACL2937J1ZE':'BHIWANDI D.C.','09AAACL2937J1ZC':'GHAZIABAD D.C.','29AAACL2937J1ZA':'BANGALORE - SOUTH RDC','19AAACL2937J1ZB':'KOLKATA D.C.'};
+
+let parsedData = null;
+
+// ─── Drag & drop ─────────────────────────────────────────
+const dropEl = document.getElementById('drop');
+dropEl.addEventListener('dragover', e=>{e.preventDefault();dropEl.classList.add('over')});
+dropEl.addEventListener('dragleave', ()=>dropEl.classList.remove('over'));
+dropEl.addEventListener('drop', e=>{e.preventDefault();dropEl.classList.remove('over');const f=e.dataTransfer.files[0];if(f&&f.name.endsWith('.pdf'))uploadPDF(f);else showSt('upSt','Please drop a PDF file.','err')});
+document.getElementById('fi').addEventListener('change',e=>{if(e.target.files[0])uploadPDF(e.target.files[0])});
+
+function showSt(id,msg,type){const el=document.getElementById(id);el.textContent=msg;el.className='status '+type;el.style.display='block'}
+function hideSt(id){document.getElementById(id).style.display='none'}
+
+async function uploadPDF(file){
+  showSt('upSt','⏳ Parsing PDF…','info');
+  dropEl.querySelector('strong').textContent='📄 '+file.name;
+  try{
+    const data=await parsePOPDF(file);
+    parsedData=data;
+    populateForm(data);
+    showSt('upSt','✅ Parsed PO '+data.poNumber+' — '+data.locations.length+' location(s) found','ok');
+  }catch(e){showSt('upSt','❌ '+e.message,'err');console.error(e)}
+}
+
+// ─── PDF PARSER ──────────────────────────────────────────
+async function parsePOPDF(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+
+  const result = {
+    poNumber:'', orderDate:'', supplierGSTIN: SUP.gstin,
+    rate:255, mrp:599, hsn:'6206300',
+    styleNo:'', itemDesc:'KINARA', colour:'OFF WHITE',
+    prepackRatio:{S:2,M:2,L:2,XL:1,XXL:1},
+    prepackArticle:'', singleArticlePrefix:'',
+    locations:[]
+  };
+
+  // Collect all text items per page with positions
+  const allPages = [];
+  for(let p=1;p<=pdf.numPages;p++){
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const items = tc.items
+      .map(i=>({t:i.str.trim(), x:Math.round(i.transform[4]), y:Math.round(i.transform[5])}))
+      .filter(i=>i.t.length>0);
+    allPages.push(items);
+  }
+
+  // Full text for simple regex extraction
+  const fullText = allPages.map(pg=>pg.map(i=>i.t).join('\n')).join('\n');
+
+  // Basic fields
+  let m;
+  m=fullText.match(/Order No:\s*(\d+)/); if(m) result.poNumber=m[1];
+  m=fullText.match(/Order Date:\s*(\S+)/); if(m) result.orderDate=m[1];
+  m=fullText.match(/UTEKS\n([A-Z]\d+[A-Z0-9]*)/); if(m) result.styleNo='UTEKS'+m[1];
+  else{m=fullText.replace(/\n/g,'').match(/UTEKS([A-Z]\d+[A-Z0-9]+)/); if(m) result.styleNo='UTEKS'+m[1];}
+  m=fullText.match(/(\d{5})\n0{3}/); if(m) result.hsn=m[1]+'000';
+  if(fullText.includes('OFF WHITE')) result.colour='OFF WHITE';
+
+  // Prepack ratio from pack table near end of PDF
+  const ratioMatches=[...fullText.matchAll(/KINARA\s+\d{13}\s+\S+\s+(S|M|L|XL|XXL)\s+(\d+)/g)];
+  if(ratioMatches.length){const r={};for(const mm of ratioMatches) r[mm[1]]=parseInt(mm[2]);result.prepackRatio=r;}
+
+  // Article numbers (13-digit codes)
+  const codes=[...fullText.replace(/\n/g,'').matchAll(/100001\d{7}/g)].map(mm=>mm[0]);
+  for(const c of new Set(codes)){
+    if(c.includes('16638')) result.prepackArticle=c;
+    else if(c.includes('16637')) result.singleArticlePrefix=c.slice(0,10);
+  }
+
+  // ─── Location + quantity extraction ───
+  // Strategy: scan pages in order, track current location,
+  // extract item quantities using: qty = TotUnitVal / rate
+  // TotUnitVal appears as "[digits]." followed by "00" in the text stream
+
+  const locsSeen = {};   // gstin → {name, gstin, items:{}}
+  const locsOrder = [];
+  let curGSTIN = null;
+
+  for(const pgItems of allPages){
+    // Sort top-to-bottom, left-to-right (PDF y=0 is bottom, so higher y = higher on page)
+    const sorted = [...pgItems].sort((a,b)=>b.y-a.y||a.x-b.x);
+    const pgText = sorted.map(i=>i.t).join('\n');
+
+    // Find any new LOCATION: header on this page
+    const locMs=[...pgText.matchAll(/LOCATION:([^\n]+?)\s+GSTIN:([A-Z0-9]{15})/g)];
+    for(const lm of locMs){
+      const gstin=lm[2].trim(), name=lm[1].trim();
+      if(!locsSeen[gstin]){
+        locsSeen[gstin]={name, gstin, items:{}};
+        locsOrder.push(gstin);
+      }
+      // Update curGSTIN only after processing tables above this header
+      // (handled below via y-position comparison)
+    }
+
+    // Build a list of (y_position, gstin) for location headers on this page
+    const locHeaderYs=[];
+    for(const it of sorted){
+      if(it.t.startsWith('LOCATION:')||it.t==='LOCATION:'){
+        // Find the GSTIN from nearby items (same y)
+        const nearby=sorted.filter(x=>Math.abs(x.y-it.y)<5).map(x=>x.t).join(' ');
+        const gm=nearby.match(/GSTIN:([A-Z0-9]{15})/);
+        if(gm) locHeaderYs.push({y:it.y, gstin:gm[1]});
+      }
+    }
+
+    // Determine GSTIN for any y position on this page
+    function gstinAtY(y){
+      // last loc header with y >= tableY (above the table)
+      let best=curGSTIN;
+      for(const lh of locHeaderYs){
+        if(lh.y>=y) best=lh.gstin;
+      }
+      return best;
+    }
+
+    // Find item rows: look for "16637" or "16638" text items
+    // Group by approximate y position
+    const yGroups={};
+    for(const it of sorted){
+      const ky=Math.round(it.y/3)*3; // bucket to nearest 3px
+      if(!yGroups[ky]) yGroups[ky]=[];
+      yGroups[ky].push(it);
+    }
+
+    // Scan through y groups top-to-bottom
+    const yKeys=Object.keys(yGroups).map(Number).sort((a,b)=>b-a);
+
+    // Collect text per y-band, tracking "item blocks"
+    // An item block starts when we see item code fragments (16637xxx)
+    let itemCodeBuf='', descBuf='', packInd='', afterCostBuf=[];
+    let inItem=false, itemY=0, itemGSTIN=null;
+
+    const finaliseItem=()=>{
+      if(!inItem||!itemGSTIN) return;
+      // Determine size from descBuf
+      let size=null;
+      const dm=descBuf.match(/WHITE[:\s]*(XXL|XL|2XL|3XL|S|M|L)\b/i);
+      if(dm) size=dm[1].toUpperCase();
+      else if(packInd==='Y') size='PREPACK';
+      else{
+        // try item code suffix
+        const sfx=itemCodeBuf.replace(/\D/g,'').slice(-3);
+        const MAP={'621':'L','623':'M','625':'S','627':'XL','629':'XXL'};
+        if(MAP[sfx]) size=MAP[sfx];
+        else if(itemCodeBuf.includes('16638')) size='PREPACK';
+      }
+      if(!size){inItem=false;return;}
+
+      // Extract qty from afterCostBuf
+      // Find first token matching "[digits]." = start of TotUnitVal
+      const qty=extractQty(afterCostBuf, parseFloat(document.getElementById('rate').value)||255);
+      if(qty>0){
+        if(!locsSeen[itemGSTIN]) locsSeen[itemGSTIN]={name:'Unknown',gstin:itemGSTIN,items:{}};
+        if(!locsSeen[itemGSTIN].items[size]) // only first occurrence per size per location
+          locsSeen[itemGSTIN].items[size]=qty;
+      }
+      inItem=false; itemCodeBuf=''; descBuf=''; packInd=''; afterCostBuf=[];
+    };
+
+    for(const yk of yKeys){
+      const band=yGroups[yk];
+      const bandText=band.map(i=>i.t).join(' ');
+
+      // Check if this band contains item code fragments
+      if(/\b10000\b|\b16637\b|\b16638\b|\b62063\b/.test(bandText)){
+        // New item row starting
+        if(inItem && !bandText.includes('16637') && !bandText.includes('16638')) {
+          // continuation of previous item
+        } else {
+          if(inItem) finaliseItem();
+          inItem=true;
+          itemY=yk;
+          itemGSTIN=gstinAtY(yk)||curGSTIN;
+          itemCodeBuf=bandText.replace(/\s/g,'');
+          descBuf=bandText;
+          // Check pack indicator
+          if(/\bY\b/.test(bandText)&&/16638/.test(bandText.replace(/\s/g,''))) packInd='Y';
+          else packInd='N';
+          afterCostBuf=[];
+        }
+      } else if(inItem){
+        // Continuation bands: accumulate description and post-cost numbers
+        descBuf+=' '+bandText;
+        itemCodeBuf+=bandText.replace(/\s/g,'');
+        // After "255.00" appears, collect numeric tokens
+        if(bandText.includes('255.00')||afterCostBuf.length>0){
+          // extract tokens from this band
+          const toks=band.map(i=>i.t);
+          let pastCost=afterCostBuf.length>0;
+          for(const tk of toks){
+            if(tk==='255.00') pastCost=true;
+            else if(pastCost) afterCostBuf.push(tk);
+          }
+        }
+        // Finalise when we see the next size label clearly
+        if(/\b(S|M|L|XL|XXL)\b/.test(bandText)&&/WHITE/i.test(descBuf)&&afterCostBuf.length>0){
+          finaliseItem();
+        }
+      }
+
+      // Update curGSTIN as we pass location headers
+      for(const lh of locHeaderYs){
+        if(Math.abs(lh.y-yk)<5) curGSTIN=lh.gstin;
+      }
+    }
+    if(inItem) finaliseItem();
+
+    // Update curGSTIN to last header on this page
+    if(locHeaderYs.length) curGSTIN=locHeaderYs[locHeaderYs.length-1].gstin;
+  }
+
+  // Fallback: try simpler regex-based extraction on full text
+  // For each location section, extract quantities using qty=TotUnitVal/rate
+  for(const gstin of locsOrder){
+    const loc=locsSeen[gstin];
+    const items=loc.items;
+    if(Object.keys(items).length<3){
+      // Try regex fallback on full text
+      extractByRegex(fullText, gstin, items, result.rate);
+    }
+    loc.address_lines = KNOWN_ADDR[gstin] || ['','',''];
+  }
+
+  // Assemble locations
+  for(const gstin of locsOrder){
+    result.locations.push(locsSeen[gstin]);
+  }
+
+  return result;
+}
+
+function extractQty(tokens, rate){
+  // tokens are text items after "255.00" in an item row
+  // Find TotUnitVal = first token matching /^\d{5,}\.?$/ or separate "digits" + "."
+  // TotUnitVal = qty * rate
+  let totVal=null;
+  const nums=[];
+  for(let i=0;i<tokens.length;i++){
+    const t=tokens[i].replace(',','');
+    if(/^\d{5,}\.?$/.test(t)){totVal=parseFloat(t);break;}
+    if(/^\d{5,}\.\d*$/.test(t)){totVal=parseFloat(t);break;}
+    if(/^\d+$/.test(t)) nums.push(t);
+    // Detect "[digits]." + "00" pattern
+    if(/^\d{4,}\.$/.test(t)&&tokens[i+1]==='00'){totVal=parseFloat(t+'00');break;}
+  }
+  if(!totVal){
+    // Try full number reconstruction: find the product qty*rate
+    const allNums=tokens.map(t=>t.replace(',','')).filter(t=>/^\d+$/.test(t)||/^\d+\.\d*$/.test(t));
+    for(const n of allNums){
+      const v=parseFloat(n);
+      if(v>9999&&v%rate<0.5){totVal=v;break;}
+    }
+  }
+  if(!totVal) return 0;
+  const qty=Math.round(totVal/rate);
+  if(Math.abs(qty*rate-totVal)<1) return qty;
+  // Try concatenating collected nums
+  for(let split=0;split<nums.length;split++){
+    const candidate=parseInt(nums.slice(split).join(''));
+    if(candidate>0&&Math.abs(candidate*rate-totVal)<1) return candidate;
+  }
+  return 0;
+}
+
+function extractByRegex(fullText, gstin, items, rate){
+  // Find the section for this gstin
+  const gIdx=fullText.indexOf(gstin);
+  if(gIdx<0) return;
+  const nextGIdx=fullText.indexOf('GSTIN:', gIdx+10);
+  const section=fullText.slice(gIdx, nextGIdx>0?nextGIdx:gIdx+5000);
+
+  const SIZE_CODES={'621':'L','623':'M','625':'S','627':'XL','629':'XXL'};
+  for(const [code,size] of Object.entries(SIZE_CODES)){
+    if(items[size]) continue;
+    // Look for "16637[code]" in section
+    const codePattern=new RegExp('16637\\s*'+code+'[\\s\\S]{0,400}?255\\.00','');
+    const cM=section.match(codePattern);
+    if(!cM) continue;
+    const afterSection=section.slice(section.indexOf(cM[0])+cM[0].length);
+    const qty=extractFromSection(afterSection, rate);
+    if(qty>0) items[size]=qty;
+  }
+  // Prepack
+  if(!items['PREPACK']){
+    const ppM=section.match(/16638[\s\S]{0,400}?255\.00/);
+    if(ppM){
+      const afterSection=section.slice(section.indexOf(ppM[0])+ppM[0].length);
+      const qty=extractFromSection(afterSection, rate);
+      if(qty>0) items['PREPACK']=qty;
+    }
+  }
+}
+
+function extractFromSection(text, rate){
+  const tokens=text.split(/\s+/).filter(t=>t.length>0).slice(0,20);
+  return extractQty(tokens, rate);
+}
+
+// ─── FORM POPULATION ─────────────────────────────────────
+function populateForm(d){
+  document.getElementById('poNum').value=d.poNumber;
+  document.getElementById('poDate').value=d.orderDate;
+  document.getElementById('supGSTIN').value=d.supplierGSTIN;
+  document.getElementById('rate').value=d.rate;
+  document.getElementById('mrp').value=d.mrp;
+  document.getElementById('hsn').value=d.hsn;
+  document.getElementById('styleNo').value=d.styleNo;
+  document.getElementById('itemDesc').value=d.itemDesc;
+  document.getElementById('colour').value=d.colour;
+  const r=d.prepackRatio||{S:2,M:2,L:2,XL:1,XXL:1};
+  document.getElementById('ratio').value=['S','M','L','XL','XXL'].map(s=>r[s]||0).join(':');
+  buildTabs(d.locations);
+  ['poCard','setCard','locCard','genCard'].forEach(id=>document.getElementById(id).style.display='');
+}
+
+function buildTabs(locs){
+  const bar=document.getElementById('tabBar'), panels=document.getElementById('tabPanels');
+  bar.innerHTML=''; panels.innerHTML='';
+  const today=new Date().toLocaleDateString('en-IN',{day:'2-digit',month:'2-digit',year:'numeric'}).replace(/\//g,'.');
+  locs.forEach((loc,idx)=>{
+    const pid='pnl_'+idx;
+    const btn=document.createElement('button');
+    btn.className='tab'+(idx===0?' active':'');
+    btn.textContent=loc.name||loc.gstin;
+    btn.onclick=()=>{
+      document.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(pid).classList.add('active');
+    };
+    bar.appendChild(btn);
+    const panel=document.createElement('div');
+    panel.id=pid; panel.className='panel'+(idx===0?' active':'');
+    const addr=(loc.address_lines||['','',' ']).join('\n');
+    const items=loc.items||{};
+    let rows='';
+    SIZES.forEach(sz=>{
+      rows+=`<tr><td><strong>${sz}</strong></td>
+        <td><input type="number" id="qty_${idx}_${sz}" value="${items[sz]||0}" min="0" oninput="recalc(${idx})"></td>
+        <td id="tv_${idx}_${sz}" style="color:var(--muted);font-size:12px">—</td></tr>`;
+    });
+    panel.innerHTML=`
+      <div class="loc-grid">
+        <div><label>Invoice Number</label><input type="text" id="inv_${idx}" placeholder="e.g. GS/029299"></div>
+        <div><label>Date of Supply</label><input type="text" id="ds_${idx}" value="${today}"></div>
+        <div><label>Buyer GSTIN</label><input type="text" id="bg_${idx}" value="${loc.gstin||''}"></div>
+        <div><label>L.R No &amp; Date</label><input type="text" id="lr_${idx}"></div>
+        <div><label>M V No.</label><input type="text" id="mv_${idx}"></div>
+        <div><label>Transporter</label><input type="text" id="tr_${idx}"></div>
+      </div>
+      <div><label>Delivery Address (3 lines)</label>
+        <textarea id="addr_${idx}" rows="3" style="font-size:13px">${addr}</textarea></div>
+      <table class="sz"><thead><tr><th>Size</th><th>Quantity</th><th>Taxable Value</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="background:#f8f9fa">
+          <td><strong>TOTAL</strong></td>
+          <td id="tq_${idx}" style="font-weight:600;text-align:center">—</td>
+          <td id="tt_${idx}" style="font-weight:600;text-align:center">—</td>
+        </tr></tfoot></table>`;
+    panels.appendChild(panel);
+    recalc(idx);
+  });
+}
+
+function recalc(idx){
+  const rate=parseFloat(document.getElementById('rate').value)||255;
+  const r=parseRatio();
+  const ppc=Object.values(r).reduce((a,b)=>a+b,0)||8;
+  let tq=0,tt=0;
+  SIZES.forEach(sz=>{
+    const el=document.getElementById('qty_'+idx+'_'+sz); if(!el) return;
+    const qty=parseInt(el.value)||0;
+    const tax=qty*rate; tq+=qty; tt+=tax;
+    const tv=document.getElementById('tv_'+idx+'_'+sz);
+    if(tv) tv.textContent=qty>0?'₹ '+tax.toLocaleString('en-IN'):'—';
+  });
+  const tqEl=document.getElementById('tq_'+idx), ttEl=document.getElementById('tt_'+idx);
+  if(tqEl) tqEl.textContent=tq.toLocaleString('en-IN')+' pcs';
+  if(ttEl) ttEl.textContent='₹ '+tt.toLocaleString('en-IN');
+}
+
+function parseRatio(){
+  const raw=document.getElementById('ratio').value||'2:2:2:1:1';
+  const p=raw.split(':').map(Number);
+  return {S:p[0]||0,M:p[1]||0,L:p[2]||0,XL:p[3]||0,XXL:p[4]||0};
+}
+
+// ─── CARTON DISTRIBUTION ────────────────────────────────
+function distributeCartons(items, ratio, maxPcs){
+  const ppc=Object.values(ratio).reduce((a,b)=>a+b,0)||8;
+  const maxPP=Math.max(1,Math.floor(maxPcs/ppc));
+  const cartons=[];
+  ['S','M','L','XL','XXL'].forEach(sz=>{
+    let rem=parseInt(items[sz]||0);
+    while(rem>0){
+      const take=Math.min(rem,maxPcs);
+      cartons.push({type:'SINGLE',pcs:take,S:0,M:0,L:0,XL:0,XXL:0,total:take,[sz]:take});
+      rem-=take;
+    }
+  });
+  const preTotal=parseInt(items['PREPACK']||0);
+  let ppUnits=Math.floor(preTotal/ppc);
+  while(ppUnits>0){
+    const take=Math.min(ppUnits,maxPP);
+    const row={type:'PREPACK',pcs:take,total:take*ppc};
+    ['S','M','L','XL','XXL'].forEach(sz=>row[sz]=(take*(ratio[sz]||0)));
+    cartons.push(row);
+    ppUnits-=take;
+  }
+  return cartons;
+}
+
+// ─── INDIAN AMOUNT IN WORDS ──────────────────────────────
+const ONES=['','ONE','TWO','THREE','FOUR','FIVE','SIX','SEVEN','EIGHT','NINE','TEN','ELEVEN','TWELVE','THIRTEEN','FOURTEEN','FIFTEEN','SIXTEEN','SEVENTEEN','EIGHTEEN','NINETEEN'];
+const TENS=['','','TWENTY','THIRTY','FORTY','FIFTY','SIXTY','SEVENTY','EIGHTY','NINETY'];
+function two(n){return n<20?ONES[n]:TENS[Math.floor(n/10)]+(n%10?' '+ONES[n%10]:'')}
+function three(n){return n<100?two(n):ONES[Math.floor(n/100)]+' HUNDRED'+(n%100?' '+two(n%100):'')}
+function amtWords(n){
+  n=Math.round(n); if(!n) return 'ZERO';
+  const parts=[];
+  const cr=Math.floor(n/1e7);n%=1e7;
+  const lk=Math.floor(n/1e5);n%=1e5;
+  const th=Math.floor(n/1e3);n%=1e3;
+  if(cr) parts.push(two(cr)+' CRORE');
+  if(lk) parts.push(two(lk)+' LAKH');
+  if(th) parts.push(two(th)+' THOUSAND');
+  if(n)  parts.push(three(n));
+  return 'RUPEES : '+parts.join(' ')+' ONLY.';
+}
+
+// ─── XLSX HELPERS (SheetJS) ──────────────────────────────
+const THIN={style:'thin',color:{auto:1}};
+const ALL_BORDER={top:THIN,bottom:THIN,left:THIN,right:THIN};
+
+function cellStyle(opts={}){
+  return {
+    font:{name:'Arial',sz:opts.sz||10,bold:!!opts.bold},
+    alignment:{horizontal:opts.align||'left',vertical:'center',wrapText:true},
+    border: ALL_BORDER,
+    fill: opts.bg ? {fgColor:{rgb:opts.bg},patternType:'solid'} : {patternType:'none'}
+  };
+}
+
+function sc(ws, r, c, v, opts={}){
+  const addr=XLSX.utils.encode_cell({r,c});
+  ws[addr]={
+    v: (opts.formula ? undefined : v),
+    f: opts.formula||undefined,
+    t: opts.formula?'n': (typeof v==='number'?'n':(v instanceof Date?'d':'s')),
+    s: cellStyle(opts),
+    z: opts.fmt||undefined
+  };
+  if(typeof v==='number'&&!opts.formula) ws[addr].v=v;
+  if(!ws['!ref']) ws['!ref']='A1:A1';
+  // update ref
+  const ref=XLSX.utils.decode_range(ws['!ref']);
+  ref.e.r=Math.max(ref.e.r,r); ref.e.c=Math.max(ref.e.c,c);
+  ws['!ref']=XLSX.utils.encode_range(ref);
+}
+
+function merge(ws, r1, c1, r2, c2){
+  if(!ws['!merges']) ws['!merges']=[];
+  ws['!merges'].push({s:{r:r1,c:c1},e:{r:r2,c:c2}});
+}
+
+function blankRow(ws, r, cols){
+  for(let c=0;c<cols;c++) sc(ws,r,c,'');
+}
+
+// ─── INVOICE GENERATOR ───────────────────────────────────
+function makeInvoice(location, items, poData, invNum, dateSupply, lrNo, mvNo, modeT, transporter, numCartons){
+  const wb=XLSX.utils.book_new();
+  const ws={};
+
+  const GREY='D9D9D9', C=13; // 13 columns (A-M = 0-12)
+
+  function msc(r,c1,c2,v,opts){sc(ws,r,c1,v,opts);merge(ws,r,c1,r,c2);for(let c=c1+1;c<=c2;c++) sc(ws,r,c,'',opts);}
+
+  // R0: TAX INVOICE
+  msc(0,0,12,'TAX INVOICE',{bold:true,sz:14,align:'center'});
+  // R1: Company name
+  msc(1,0,12,SUP.name,{bold:true,sz:11,align:'center'});
+  // R2-4: Addresses
+  msc(2,0,12,SUP.addr1,{sz:8,align:'center'});
+  msc(3,0,12,SUP.addr2,{sz:8,align:'center'});
+  msc(4,0,12,SUP.addr3,{sz:8,align:'center'});
+  // R5: blank
+  msc(5,0,12,'',{});
+  // R6: Invoice No + LR
+  sc(ws,6,0,'Invoice No :',{bold:true}); sc(ws,6,1,invNum,{bold:true}); merge(ws,6,1,6,5); for(let c=2;c<=5;c++) sc(ws,6,c,'');
+  sc(ws,6,6,'L.R No & Date :',{bold:true}); sc(ws,6,7,lrNo); merge(ws,6,7,6,12); for(let c=8;c<=12;c++) sc(ws,6,c,'');
+  // R7
+  sc(ws,7,0,'Date of Supply : '+dateSupply); merge(ws,7,0,7,5); for(let c=1;c<=5;c++) sc(ws,7,c,'');
+  sc(ws,7,6,'M V No :',{bold:true}); sc(ws,7,7,mvNo); merge(ws,7,7,7,12); for(let c=8;c<=12;c++) sc(ws,7,c,'');
+  // R8
+  sc(ws,8,0,'GSTIN No : '+SUP.gstin); merge(ws,8,0,8,5); for(let c=1;c<=5;c++) sc(ws,8,c,'');
+  sc(ws,8,6,'Mode of Transport :',{bold:true}); sc(ws,8,7,modeT); merge(ws,8,7,8,12); for(let c=8;c<=12;c++) sc(ws,8,c,'');
+  // R9
+  msc(9,0,5,''); sc(ws,9,6,'Transporter Name :',{bold:true}); sc(ws,9,7,transporter); merge(ws,9,7,9,12); for(let c=8;c<=12;c++) sc(ws,9,c,'');
+  // R10
+  sc(ws,10,0,'Purchase Order No : '+poData.poNumber); merge(ws,10,0,10,5); for(let c=1;c<=5;c++) sc(ws,10,c,'');
+  sc(ws,10,6,'No. of Cartons : '+numCartons,{bold:true}); merge(ws,10,6,10,12); for(let c=7;c<=12;c++) sc(ws,10,c,'');
+  // R11: Section headers
+  msc(11,0,4,'Details of Receiver (Billed to)',{bold:true,align:'center',bg:GREY});
+  msc(11,5,8,'Details of Consignee (Shipped to)',{bold:true,align:'center',bg:GREY});
+  msc(11,9,12,'Delivery From:-',{bold:true,align:'center',bg:GREY});
+
+  const addr=location.address_lines||['','',''];
+  while(addr.length<3) addr.push('');
+
+  // R12-15: Addresses
+  [[LIFESTYLE,LIFESTYLE,SUP.from1],[addr[0],addr[0],SUP.from2],
+   [addr[1],addr[1],SUP.from3],[addr[2],addr[2],SUP.from4]].forEach(([a,b,c],i)=>{
+    msc(12+i,0,4,a,{bold:i===0}); msc(12+i,5,8,b,{bold:i===0}); msc(12+i,9,12,c,{bold:i===0});
+  });
+
+  // R16: GSTINs
+  const bg=location.gstin||'';
+  sc(ws,16,0,'GSTIN No.',{bold:true}); sc(ws,16,1,bg); merge(ws,16,1,16,4); for(let c=2;c<=4;c++) sc(ws,16,c,'');
+  sc(ws,16,5,'GSTIN No.',{bold:true}); sc(ws,16,6,bg); merge(ws,16,6,16,8); for(let c=7;c<=8;c++) sc(ws,16,c,'');
+  for(let c=9;c<=12;c++) sc(ws,16,c,'');
+
+  // R17: blank
+  blankRow(ws,17,C);
+
+  // R18: Column headers
+  ['S.No.','Article No.','Colour','Size','Item Description','Style No.','UOM','HSN Code',
+   'Item / Unit MRP','No of Packs','Item Qty','Item / Unit Rate','Taxable value']
+    .forEach((h,c)=>sc(ws,18,c,h,{bold:true,align:'center',bg:GREY}));
+
+  // R19: blank
+  blankRow(ws,19,C);
+
+  // Build article map
+  const pfx=poData.singleArticlePrefix||'';
+  const artMap={PREPACK:poData.prepackArticle||'',S:pfx+'625',M:pfx+'623',L:pfx+'621',XL:pfx+'627',XXL:pfx+'629'};
+
+  const rate=parseFloat(poData.rate)||255;
+  const mrp=parseFloat(poData.mrp)||599;
+  const ppc=Object.values(poData.prepackRatio||{S:2,M:2,L:2,XL:1,XXL:1}).reduce((a,b)=>a+b,0)||8;
+  const intra=bg.slice(0,2)===SUP.gstin.slice(0,2);
+
+  let tPacks=0, tQty=0, tTax=0, rowNum=20;
+  SIZES.forEach((sz,si)=>{
+    const qty=parseInt(items[sz]||0);
+    const packs=(sz==='PREPACK')?Math.floor(qty/ppc):qty;
+    const tax=parseFloat((qty*rate).toFixed(2));
+    tPacks+=packs; tQty+=qty; tTax+=tax;
+    const fmtNum='#,##0.00';
+    sc(ws,rowNum,0,si+1,{align:'center'});
+    sc(ws,rowNum,1,artMap[sz]||'');
+    sc(ws,rowNum,2,poData.colour||'OFF WHITE');
+    sc(ws,rowNum,3,sz==='PREPACK'?'':sz,{align:'center'});
+    sc(ws,rowNum,4,poData.itemDesc||'KINARA');
+    sc(ws,rowNum,5,poData.styleNo||'');
+    sc(ws,rowNum,6,sz==='PREPACK'?'PPK':'EACH',{align:'center'});
+    sc(ws,rowNum,7,poData.hsn||'6206300',{align:'center'});
+    sc(ws,rowNum,8,mrp,{align:'right',fmt:fmtNum});
+    sc(ws,rowNum,9,packs,{align:'center'});
+    sc(ws,rowNum,10,qty,{align:'center'});
+    sc(ws,rowNum,11,rate,{align:'right',fmt:fmtNum});
+    sc(ws,rowNum,12,tax,{align:'right',fmt:fmtNum});
+    rowNum++;
+  });
+  // Pad to row 26 (6 items: rows 20-25)
+  while(rowNum<26){blankRow(ws,rowNum,C);rowNum++;}
+
+  // R26: Totals
+  for(let c=0;c<9;c++) sc(ws,26,c,'');
+  sc(ws,26,9,tPacks,{bold:true,align:'center'});
+  sc(ws,26,10,tQty,{bold:true,align:'center'});
+  sc(ws,26,11,'Total',{bold:true,align:'right'});
+  sc(ws,26,12,parseFloat(tTax.toFixed(2)),{bold:true,align:'right',fmt:'#,##0.00'});
+
+  const taxable=parseFloat(tTax.toFixed(2));
+  const cgst=intra?parseFloat((taxable*0.025).toFixed(2)):0;
+  const sgst=intra?parseFloat((taxable*0.025).toFixed(2)):0;
+  const igst=!intra?parseFloat((taxable*0.05).toFixed(2)):0;
+  const preRound=parseFloat((taxable+cgst+sgst+igst).toFixed(2));
+  const bill=Math.round(preRound);
+  const adj=parseFloat((bill-preRound).toFixed(2));
+  const mrpTotal=parseFloat((tQty*mrp).toFixed(2));
+
+  // R27: SGST
+  for(let c=0;c<11;c++) sc(ws,27,c,'');
+  sc(ws,27,11,'2.50% SGST',{bold:true,align:'right'});
+  sc(ws,27,12,intra?sgst:'',{align:'right',fmt:'#,##0.00'});
+  // R28: MRP + CGST
+  for(let c=0;c<6;c++) sc(ws,28,c,'');
+  sc(ws,28,6,'MRP Value',{bold:true}); sc(ws,28,7,'');
+  sc(ws,28,8,mrpTotal,{bold:true,align:'right',fmt:'#,##0.00'});
+  for(let c=9;c<11;c++) sc(ws,28,c,'');
+  sc(ws,28,11,'2.50% CGST',{bold:true,align:'right'});
+  sc(ws,28,12,intra?cgst:'',{align:'right',fmt:'#,##0.00'});
+  // R29: IGST
+  for(let c=0;c<11;c++) sc(ws,29,c,'');
+  sc(ws,29,11,'5.00% IGST',{bold:true,align:'right'});
+  sc(ws,29,12,intra?0:igst,{align:'right',fmt:'#,##0.00'});
+  // R30: In words
+  sc(ws,30,0,''); sc(ws,30,1,'Invoice Total (In Words)',{bold:true});
+  sc(ws,30,2,''); sc(ws,30,3,amtWords(bill)); merge(ws,30,3,30,10); for(let c=4;c<=10;c++) sc(ws,30,c,'');
+  for(let c=11;c<C;c++) sc(ws,30,c,'');
+  // R31: Rounding
+  for(let c=0;c<12;c++) sc(ws,31,c,'');
+  sc(ws,31,12,adj||0,{align:'right',fmt:'#,##0.00'});
+  // R32: Total Bill
+  for(let c=0;c<11;c++) sc(ws,32,c,'');
+  sc(ws,32,11,'Total Bill',{bold:true,align:'right'});
+  sc(ws,32,12,bill,{bold:true,align:'right',fmt:'#,##0.00'});
+
+  // R33: blank
+  blankRow(ws,33,C);
+  // R34: Terms
+  sc(ws,34,0,''); msc(34,1,7,'Terms and Conditions :',{bold:true});
+  msc(34,8,12,'For  '+SUP.name,{bold:true,align:'center'});
+  const terms=['1. Subject to Mumbai Jurisdiction','2. Make all A/c payee cheques payable to:','M/S. '+SUP.name,
+    '3. If payment not received on due date interest','will be charge @ 24% p.a.',
+    '4. Goods once sold will not be accpeted back.',
+    '5. Any short fall should be intimated to us within','one week of receipt of goods'];
+  terms.forEach((t,i)=>{
+    const r=35+i;
+    sc(ws,r,0,''); msc(r,1,8,t,{});
+    if(i===6) msc(r,9,12,'Authorised Signatory',{bold:true,align:'center'});
+    else msc(r,9,12,'',{});
+  });
+
+  // Column widths & row heights
+  ws['!cols']=[{},{wch:16},{wch:11},{wch:6},{wch:20},{wch:16},{wch:7},{wch:11},{wch:14},{wch:11},{wch:11},{wch:13},{wch:16}];
+  const rh=Array(45).fill({hpt:18});
+  rh[0]={hpt:24}; rh[18]={hpt:28};
+  ws['!rows']=rh;
+
+  XLSX.utils.book_append_sheet(wb, ws, 'INV');
+  return XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
+}
+
+// ─── PACKING LIST GENERATOR ──────────────────────────────
+function makePackingList(locsData, poData, maxPcs, ppWt, boxWt){
+  const wb=XLSX.utils.book_new();
+  const ratio=poData.prepackRatio||{S:2,M:2,L:2,XL:1,XXL:1};
+  const GREY='D9D9D9';
+  const C=14; // columns A-N (0-13)
+
+  locsData.forEach(ld=>{
+    const loc=ld.location, items=ld.items, invNum=ld.invNum||'';
+    const gstin=loc.gstin||'';
+    const sheetName=SHEET_NAMES[gstin]||gstin.slice(0,4);
+    const ws={};
+
+    const cartons=distributeCartons(items,ratio,maxPcs);
+    const orderQty=Object.values(items).reduce((a,b)=>a+parseInt(b||0),0);
+    const packedQty=cartons.reduce((a,c)=>a+c.total,0);
+    const style=`${poData.styleNo||''}\n-${poData.colour||'OFF WHITE'}`;
+    const locDisp=LOC_DISPLAY[gstin]||loc.name||'';
+
+    function msc(r,c1,c2,v,opts){sc(ws,r,c1,v,opts);merge(ws,r,c1,r,c2);for(let c=c1+1;c<=c2;c++) sc(ws,r,c,'',opts);}
+
+    // Blank col A for each header row + merged title
+    for(let r=0;r<8;r++) sc(ws,r,0,'',{});
+
+    msc(0,1,13,'LIFESTYLE INTERNATIONAL PVT LTD  ( MAX RETAIL DIVISION )',{bold:true,sz:12,align:'center'});
+    msc(1,1,13,'PACKING SLIP',{bold:true,sz:11,align:'center'});
+    sc(ws,2,1,'BRAND            :',{bold:true}); sc(ws,2,2,''); msc(2,3,13,'MAX',{bold:true});
+    sc(ws,3,1,'LOCATION',{bold:true}); sc(ws,3,2,''); msc(3,3,13,locDisp,{bold:true});
+    sc(ws,4,1,'PO NO  :',{bold:true}); sc(ws,4,2,'');
+    msc(4,3,10,(poData.poNumber+(invNum?' / '+invNum:''))||'',{bold:true});
+    sc(ws,4,11,'ORDER',{bold:true,align:'right'}); sc(ws,4,12,''); sc(ws,4,13,orderQty,{bold:true,align:'center'});
+    sc(ws,5,1,'STYLE NO  :',{bold:true}); sc(ws,5,2,'');
+    msc(5,3,10,style,{bold:true});
+    sc(ws,5,11,'PACKED',{bold:true,align:'right'}); sc(ws,5,12,''); sc(ws,5,13,packedQty,{bold:true,align:'center'});
+    sc(ws,6,1,'TOTAL CARTON BOX :',{bold:true}); sc(ws,6,2,'');
+    msc(6,3,10,cartons.length+' CTN',{bold:true}); msc(6,11,13,'',{});
+
+    // R7: column headers
+    sc(ws,7,1,'CARTON NO',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,2,'NO. CTN',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,3,'COLOUR',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,4,'PCS.',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,5,'',{bg:GREY});
+    msc(7,6,10,'Sizes',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,11,'TOTAL pcs',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,12,'Nett wt',{bold:true,align:'center',bg:GREY});
+    sc(ws,7,13,'Gross Wt\n(kgs.)',{bold:true,align:'center',bg:GREY});
+
+    // R8: size sub-headers
+    [0,1,2,3,4,5,11,12,13].forEach(c=>sc(ws,8,c,'',{bg:GREY}));
+    ['S','M','L','XL','XXL'].forEach((sz,i)=>sc(ws,8,6+i,sz,{bold:true,align:'center',bg:GREY}));
+
+    // Blank separator R9
+    for(let c=0;c<C;c++) sc(ws,9,c,'',{});
+
+    // Carton rows from R10
+    cartons.forEach((ctn,i)=>{
+      const r=10+i;
+      sc(ws,r,0,'',{});
+      sc(ws,r,1,i+1,{align:'center'});
+      sc(ws,r,2,1,{align:'center'});
+      sc(ws,r,3,poData.colour||'OFF WHITE',{align:'center'});
+      sc(ws,r,4,ctn.pcs,{align:'center'});
+      sc(ws,r,5,ctn.type,{});
+      ['S','M','L','XL','XXL'].forEach((sz,si)=>{
+        const v=ctn[sz]||0;
+        sc(ws,r,6+si,v>0?v:'',{align:'center'});
+      });
+      const Lcol=XLSX.utils.encode_col(11); // col L (0-indexed 11)
+      const Mcol=XLSX.utils.encode_col(12);
+      sc(ws,r,11,ctn.total,{align:'center'});
+      sc(ws,r,12,parseFloat((ctn.total*ppWt).toFixed(2)),{align:'right',fmt:'0.00'});
+      sc(ws,r,13,parseFloat((ctn.total*ppWt+boxWt).toFixed(2)),{align:'right',fmt:'0.00'});
+    });
+
+    // Totals row
+    const tr=10+cartons.length;
+    sc(ws,tr,0,'',{}); sc(ws,tr,1,'CARTONS',{bold:true,align:'center'});
+    sc(ws,tr,2,'',{}); sc(ws,tr,3,cartons.length,{bold:true,align:'center'});
+    sc(ws,tr,4,'TOTAL',{bold:true,align:'center'}); sc(ws,tr,5,'',{});
+    ['S','M','L','XL','XXL'].forEach((sz,i)=>{
+      const tot=cartons.reduce((a,c)=>a+(c[sz]||0),0);
+      sc(ws,tr,6+i,tot,{bold:true,align:'center'});
+    });
+    const netTot=parseFloat(cartons.reduce((a,c)=>a+c.total*ppWt,0).toFixed(2));
+    const grsTot=parseFloat((netTot+cartons.length*boxWt).toFixed(2));
+    sc(ws,tr,11,packedQty,{bold:true,align:'center'});
+    sc(ws,tr,12,netTot,{bold:true,align:'right',fmt:'0.00'});
+    sc(ws,tr,13,grsTot,{bold:true,align:'right',fmt:'0.00'});
+
+    ws['!cols']=[{wch:3},{wch:12},{wch:8},{wch:12},{wch:8},{wch:10},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:12},{wch:12},{wch:14}];
+    const rh=[];for(let i=0;i<=tr;i++) rh.push({hpt:22});
+    rh[0]={hpt:20}; rh[7]={hpt:28};
+    ws['!rows']=rh;
+    if(!ws['!ref']) ws['!ref']='A1:N'+(tr+1);
+
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+
+  return XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
+}
+
+// ─── GENERATE & DOWNLOAD ────────────────────────────────
+async function generate(){
+  const btn=document.getElementById('genBtn');
+  btn.innerHTML='<span class="spin"></span>Generating…'; btn.disabled=true;
+  hideSt('genSt');
+  try{
+    const n=parsedData.locations.length;
+    const poData={
+      poNumber:document.getElementById('poNum').value,
+      orderDate:document.getElementById('poDate').value,
+      supplierGSTIN:document.getElementById('supGSTIN').value,
+      rate:parseFloat(document.getElementById('rate').value)||255,
+      mrp:parseFloat(document.getElementById('mrp').value)||599,
+      hsn:document.getElementById('hsn').value,
+      styleNo:document.getElementById('styleNo').value,
+      itemDesc:document.getElementById('itemDesc').value,
+      colour:document.getElementById('colour').value,
+      prepackRatio:parseRatio(),
+      prepackArticle:parsedData.prepackArticle||'',
+      singleArticlePrefix:parsedData.singleArticlePrefix||''
+    };
+    const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
+    const ppWt=parseFloat(document.getElementById('ppWt').value)||0.1;
+    const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
+
+    const zip=new JSZip();
+    const packLD=[];
+
+    for(let i=0;i<n;i++){
+      const loc={...parsedData.locations[i]};
+      const addrRaw=(document.getElementById('addr_'+i)?.value||'').split('\n');
+      while(addrRaw.length<3) addrRaw.push('');
+      loc.gstin=document.getElementById('bg_'+i)?.value||loc.gstin;
+      loc.address_lines=addrRaw;
+
+      const items={};
+      SIZES.forEach(sz=>{const el=document.getElementById('qty_'+i+'_'+sz);if(el) items[sz]=parseInt(el.value)||0;});
+      const invNum=document.getElementById('inv_'+i)?.value||'';
+      const ds=document.getElementById('ds_'+i)?.value||'';
+      const lr=document.getElementById('lr_'+i)?.value||'';
+      const mv=document.getElementById('mv_'+i)?.value||'';
+      const mt=document.getElementById('tr_'+i)?.value||'';
+
+      const cartons=distributeCartons(items,poData.prepackRatio,maxPcs);
+      const b64=makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
+      zip.file('Invoice_'+(invNum.replace(/\//g,'_')||loc.gstin)+'.xlsx',b64,{base64:true});
+      packLD.push({location:loc,items,invNum});
+    }
+
+    const packB64=makePackingList(packLD,poData,maxPcs,ppWt,boxWt);
+    zip.file('PackingList_'+poData.poNumber+'.xlsx',packB64,{base64:true});
+
+    const blob=await zip.generateAsync({type:'blob'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url; a.download='PO_'+poData.poNumber+'_Documents.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showSt('genSt','✅ Downloaded successfully!','ok');
+  }catch(e){
+    showSt('genSt','❌ '+e.message,'err'); console.error(e);
+  }finally{
+    btn.innerHTML='⚡ Generate Invoices & Packing List'; btn.disabled=false;
+  }
+}
+</script>
+</body>
+</html>
