@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>UTM — PO Invoice Generator</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--border:#dde1e7;--primary:#1a56db;--primary-dark:#1043b5;--text:#111827;--muted:#6b7280;--grey:#D9D9D9}
@@ -342,6 +342,8 @@ async function parsePOPDF(file){
 
       // Item code fragment: "10000" always starts a 13-digit Lifestyle SKU
       const hasItemCode=/\b10000\b/.test(bandText);
+      const rateStr=result.rate.toFixed(2);
+
       if(hasItemCode){
         if(inItem) finaliseItem();
         inItem=true;
@@ -349,24 +351,28 @@ async function parsePOPDF(file){
         itemGSTIN=gstinAtY(yk)||curGSTIN;
         itemCodeBuf=bandText.replace(/\s/g,'');
         descBuf=bandText;
-        packInd='N'; // reset; prepack detected later via missing size
+        packInd='N';
         afterCostBuf=[];
-      } else if(inItem){
-        descBuf+=' '+bandText;
-        itemCodeBuf+=bandText.replace(/\s/g,'');
-        // After the unit-cost-after-disc value appears, start collecting qty tokens
-        // The cost appears as "[rate].00" — use the rate we detected
-        const rateStr=result.rate.toFixed(2);
-        if(bandText.includes(rateStr)||afterCostBuf.length>0){
+        // CRITICAL: rate + qty tokens appear on the SAME first line as "10000"
+        // Collect them right away — don't wait for continuation bands
+        if(bandText.includes(rateStr)){
           const toks=band.map(i=>i.t);
-          let pastCost=afterCostBuf.length>0;
+          let pastCost=false;
           for(const tk of toks){
             if(tk===rateStr) pastCost=true;
             else if(pastCost) afterCostBuf.push(tk);
           }
         }
-        // Finalise when we see the next size label clearly
-        if(/\b(S|M|L|XL|XXL)\b/.test(bandText)&&/WHITE/i.test(descBuf)&&afterCostBuf.length>0){
+      } else if(inItem){
+        descBuf+=' '+bandText;
+        itemCodeBuf+=bandText.replace(/\s/g,'');
+        // Continuation bands: collect any remaining qty fragments
+        // (handles large numbers like 1194 split as "119" on line1 + "4" on line2)
+        if(afterCostBuf.length>0){
+          band.map(i=>i.t).forEach(tk=>afterCostBuf.push(tk));
+        }
+        // Finalise on size label (size always appears in its own band at the end)
+        if(/\b(S|M|L|XL|XXL|2XL|3XL)\b/.test(bandText)&&/WHITE/i.test(descBuf)){
           finaliseItem();
         }
       }
@@ -436,31 +442,25 @@ function extractQty(tokens, rate){
 }
 
 function extractByRegex(fullText, gstin, items, rate){
-  // Locate this gstin's section in the text
   const gIdx=fullText.indexOf(gstin); if(gIdx<0) return;
   const nextGIdx=fullText.indexOf('GSTIN:', gIdx+20);
-  const section=fullText.slice(gIdx, nextGIdx>0?nextGIdx:gIdx+8000);
-  const rateStr=rate.toFixed(2); // e.g. "260.00"
+  const section=fullText.slice(gIdx, nextGIdx>0?nextGIdx:gIdx+10000);
+  const rateStr=rate.toFixed(2);
 
-  // For each size: look for "WHITE: [SIZE]" or "WHITE:\n[SIZE]" then find the cost+qty pattern
-  for(const size of ['L','M','S','XL','XXL']){
-    if(items[size]) continue;
-    const sizePattern=new RegExp('WHITE[:\\s]+'+size+'\\b[\\s\\S]{0,600}?'+rateStr.replace('.','\\.'),'');
-    const cM=section.match(sizePattern);
-    if(!cM) continue;
-    const afterSection=section.slice(section.indexOf(cM[0])+cM[0].length);
-    const qty=extractFromSection(afterSection, rate);
-    if(qty>0) items[size]=qty;
-  }
-  // Prepack: look for 10000 + Y (PackInd) near the rate, with no size label
-  if(!items['PREPACK']){
-    // Prepack rows have no "WHITE: [SIZE]" but do have the rate
-    const ppM=section.match(new RegExp('10000[\\s\\S]{0,50}?\\bY\\b[\\s\\S]{0,200}?'+rateStr.replace('.','\\.')));
-    if(ppM){
-      const afterSection=section.slice(section.indexOf(ppM[0])+ppM[0].length);
-      const qty=extractFromSection(afterSection, rate);
-      if(qty>0) items['PREPACK']=qty;
-    }
+  // Rate appears BEFORE the size in text order — find every rate occurrence,
+  // extract qty from tokens right after it, then look FORWARD for the size label
+  const escaped=rateStr.replace('.','\\.');
+  const rateRe=new RegExp(escaped,'g');
+  let m;
+  while((m=rateRe.exec(section))!==null){
+    const afterRate=section.slice(m.index+rateStr.length, m.index+rateStr.length+250);
+    const qty=extractFromSection(afterRate, rate);
+    if(qty<=0) continue;
+    // Look ahead for size label (up to 500 chars forward)
+    const ahead=section.slice(m.index, m.index+500);
+    const sM=ahead.match(/WHITE[:\s\n]+(XXL|XL|2XL|3XL|S|M|L)\b/i);
+    const sz=sM ? sM[1].toUpperCase() : 'PREPACK';
+    if(!items[sz]) items[sz]=qty;
   }
 }
 
