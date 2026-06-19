@@ -41,6 +41,11 @@ table.sz input{width:80px;padding:4px 5px;border:1px solid var(--border);border-
 .info{background:#e1effe;color:#1e429f;border:1px solid #c3ddfd}.ok{background:#def7ec;color:#03543f;border:1px solid #bcf0da}.err{background:#fde8e8;color:#9b1c1c;border:1px solid #f8b4b4}
 .spin{display:inline-block;width:13px;height:13px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:sp .6s linear infinite;vertical-align:middle;margin-right:5px}
 @keyframes sp{to{transform:rotate(360deg)}}
+.btn-green{background:#0e9f6e;color:#fff}.btn-green:hover{background:#057a55}
+.btn-green:disabled{background:#84c9b0;cursor:not-allowed}
+.btn-outline{background:#fff;color:var(--primary);border:2px solid var(--primary)}.btn-outline:hover{background:#eef2ff}
+.dl-bar{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.dl-bar .btn{font-size:13px;padding:9px 16px}
 </style>
 </head>
 <body>
@@ -95,11 +100,20 @@ table.sz input{width:80px;padding:4px 5px;border:1px solid var(--border);border-
 </div>
 
 <div id="genCard" class="card" style="display:none">
+  <div class="card-title">Step 5 — Download Files</div>
   <div id="genSt" class="status"></div>
-  <button class="btn btn-primary" id="genBtn" onclick="generate()">
-    ⚡ Generate Invoices &amp; Packing List
-  </button>
-  <span style="color:var(--muted);font-size:12px;margin-left:14px">Downloads a ZIP with 4 invoice .xlsx + 1 packing list .xlsx</span>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+    <button class="btn btn-green" id="dlPackBtn" onclick="downloadPacking()">
+      📋 Download Packing List
+    </button>
+    <button class="btn btn-primary" id="genBtn" onclick="generate()">
+      📦 Download All as ZIP
+    </button>
+    <span style="color:var(--muted);font-size:12px">
+      ZIP includes all invoices + packing list &nbsp;|&nbsp;
+      Use the buttons inside each location tab above to download invoices individually
+    </span>
+  </div>
 </div>
 </div><!-- /wrap -->
 
@@ -507,7 +521,7 @@ function buildTabs(locs){
         <div><label>M V No.</label><input type="text" id="mv_${idx}"></div>
         <div><label>Transporter</label><input type="text" id="tr_${idx}"></div>
       </div>
-      <div><label>Delivery Address (3 lines)</label>
+      <div style="margin-bottom:12px"><label>Delivery Address (3 lines)</label>
         <textarea id="addr_${idx}" rows="3" style="font-size:13px">${addr}</textarea></div>
       <table class="sz"><thead><tr><th>Size</th><th>Quantity</th><th>Taxable Value</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -515,7 +529,13 @@ function buildTabs(locs){
           <td><strong>TOTAL</strong></td>
           <td id="tq_${idx}" style="font-weight:600;text-align:center">—</td>
           <td id="tt_${idx}" style="font-weight:600;text-align:center">—</td>
-        </tr></tfoot></table>`;
+        </tr></tfoot></table>
+      <div class="dl-bar">
+        <button class="btn btn-green" id="dlInvBtn_${idx}" onclick="downloadInvoice(${idx})">
+          📥 Download Invoice — ${loc.name||loc.gstin}
+        </button>
+        <span id="dlInvSt_${idx}" style="font-size:12px;color:var(--muted);align-self:center"></span>
+      </div>`;
     panels.appendChild(panel);
     recalc(idx);
   });
@@ -592,12 +612,13 @@ const THIN={style:'thin',color:{auto:1}};
 const ALL_BORDER={top:THIN,bottom:THIN,left:THIN,right:THIN};
 
 function cellStyle(opts={}){
-  return {
-    font:{name:'Arial',sz:opts.sz||10,bold:!!opts.bold},
+  const s={
+    font:{name:'Arial',sz:opts.sz||10,bold:!!opts.bold,color:{rgb:'000000'}},
     alignment:{horizontal:opts.align||'left',vertical:'center',wrapText:true},
-    border: ALL_BORDER,
-    fill: opts.bg ? {fgColor:{rgb:opts.bg},patternType:'solid'} : {patternType:'none'}
+    border:ALL_BORDER
   };
+  if(opts.bg) s.fill={fgColor:{rgb:opts.bg},patternType:'solid'};
+  return s;
 }
 
 function sc(ws, r, c, v, opts={}){
@@ -783,10 +804,23 @@ function makeInvoice(location, items, poData, invNum, dateSupply, lrNo, mvNo, mo
     else msc(r,9,12,'',{});
   });
 
-  // Column widths & row heights
-  ws['!cols']=[{},{wch:16},{wch:11},{wch:6},{wch:20},{wch:16},{wch:7},{wch:11},{wch:14},{wch:11},{wch:11},{wch:13},{wch:16}];
-  const rh=Array(45).fill({hpt:18});
-  rh[0]={hpt:24}; rh[18]={hpt:28};
+  // Column widths
+  ws['!cols']=[{wch:5},{wch:16},{wch:11},{wch:6},{wch:20},{wch:16},{wch:7},{wch:11},{wch:14},{wch:11},{wch:11},{wch:13},{wch:16}];
+  // Row heights — match original template exactly
+  const rh=Array(44).fill({hpt:18});
+  rh[0]={hpt:26};   // R1  TAX INVOICE
+  rh[1]={hpt:20};   // R2  Company name
+  rh[2]={hpt:30};   // R3  Mumbai address (wraps)
+  rh[3]={hpt:20};   // R4  Phone/GSTIN
+  rh[4]={hpt:24};   // R5  Vapi address
+  rh[5]={hpt:6};    // R6  spacer
+  rh[11]={hpt:20};  // R12 section headers
+  rh[17]={hpt:6};   // R18 spacer before column headers
+  rh[18]={hpt:30};  // R19 column headers (tall — wraps)
+  rh[19]={hpt:5};   // R20 spacer after headers
+  // Item rows R21-R26 (idx 20-25) — taller to match template
+  for(let i=20;i<=25;i++) rh[i]={hpt:40};
+  rh[33]={hpt:6};   // R34 spacer before terms
   ws['!rows']=rh;
 
   XLSX.utils.book_append_sheet(wb, ws, 'INV');
@@ -895,69 +929,129 @@ function makePackingList(locsData, poData, maxPcs, ppWt, boxWt){
   return XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
 }
 
-// ─── GENERATE & DOWNLOAD ────────────────────────────────
-async function generate(){
-  const btn=document.getElementById('genBtn');
+// ─── SHARED: collect form data for one location ──────────
+function getPoData(){
+  return {
+    poNumber:document.getElementById('poNum').value,
+    orderDate:document.getElementById('poDate').value,
+    supplierGSTIN:document.getElementById('supGSTIN').value,
+    rate:parseFloat(document.getElementById('rate').value)||255,
+    mrp:parseFloat(document.getElementById('mrp').value)||599,
+    hsn:document.getElementById('hsn').value,
+    styleNo:document.getElementById('styleNo').value,
+    itemDesc:document.getElementById('itemDesc').value,
+    colour:document.getElementById('colour').value,
+    prepackRatio:parseRatio(),
+    prepackArticle:parsedData.prepackArticle||'',
+    singleArticlePrefix:parsedData.singleArticlePrefix||''
+  };
+}
+function getLocData(i){
+  const loc={...parsedData.locations[i]};
+  const addrRaw=(document.getElementById('addr_'+i)?.value||'').split('\n');
+  while(addrRaw.length<3) addrRaw.push('');
+  loc.gstin=document.getElementById('bg_'+i)?.value||loc.gstin;
+  loc.address_lines=addrRaw;
+  const items={};
+  SIZES.forEach(sz=>{const el=document.getElementById('qty_'+i+'_'+sz);if(el) items[sz]=parseInt(el.value)||0;});
+  return {
+    loc, items,
+    invNum:document.getElementById('inv_'+i)?.value||'',
+    ds:document.getElementById('ds_'+i)?.value||'',
+    lr:document.getElementById('lr_'+i)?.value||'',
+    mv:document.getElementById('mv_'+i)?.value||'',
+    mt:document.getElementById('tr_'+i)?.value||''
+  };
+}
+function triggerDownload(b64, filename){
+  const bin=atob(b64), arr=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  const blob=new Blob([arr],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+
+// ─── DOWNLOAD ONE INVOICE ────────────────────────────────
+async function downloadInvoice(idx){
+  const btn=document.getElementById('dlInvBtn_'+idx);
+  const stEl=document.getElementById('dlInvSt_'+idx);
+  const origTxt=btn.innerHTML;
+  btn.innerHTML='<span class="spin"></span>Generating…'; btn.disabled=true;
+  stEl.textContent='';
+  try{
+    const poData=getPoData();
+    const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
+    const {loc,items,invNum,ds,lr,mv,mt}=getLocData(idx);
+    const cartons=distributeCartons(items,poData.prepackRatio,maxPcs);
+    const b64=makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
+    const fname='Invoice_'+(invNum.replace(/\//g,'_')||loc.gstin||'loc'+idx)+'.xlsx';
+    triggerDownload(b64,fname);
+    stEl.textContent='✅ Downloaded';
+    stEl.style.color='#057a55';
+  }catch(e){
+    stEl.textContent='❌ '+e.message; stEl.style.color='#e02424'; console.error(e);
+  }finally{
+    btn.innerHTML=origTxt; btn.disabled=false;
+  }
+}
+
+// ─── DOWNLOAD PACKING LIST ───────────────────────────────
+async function downloadPacking(){
+  const btn=document.getElementById('dlPackBtn');
   btn.innerHTML='<span class="spin"></span>Generating…'; btn.disabled=true;
   hideSt('genSt');
   try{
-    const n=parsedData.locations.length;
-    const poData={
-      poNumber:document.getElementById('poNum').value,
-      orderDate:document.getElementById('poDate').value,
-      supplierGSTIN:document.getElementById('supGSTIN').value,
-      rate:parseFloat(document.getElementById('rate').value)||255,
-      mrp:parseFloat(document.getElementById('mrp').value)||599,
-      hsn:document.getElementById('hsn').value,
-      styleNo:document.getElementById('styleNo').value,
-      itemDesc:document.getElementById('itemDesc').value,
-      colour:document.getElementById('colour').value,
-      prepackRatio:parseRatio(),
-      prepackArticle:parsedData.prepackArticle||'',
-      singleArticlePrefix:parsedData.singleArticlePrefix||''
-    };
+    const poData=getPoData();
     const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
     const ppWt=parseFloat(document.getElementById('ppWt').value)||0.1;
     const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
+    const packLD=[];
+    for(let i=0;i<parsedData.locations.length;i++){
+      const {loc,items,invNum}=getLocData(i);
+      packLD.push({location:loc,items,invNum});
+    }
+    const b64=makePackingList(packLD,poData,maxPcs,ppWt,boxWt);
+    triggerDownload(b64,'PackingList_'+poData.poNumber+'.xlsx');
+    showSt('genSt','✅ Packing list downloaded!','ok');
+  }catch(e){
+    showSt('genSt','❌ '+e.message,'err'); console.error(e);
+  }finally{
+    btn.innerHTML='📋 Download Packing List'; btn.disabled=false;
+  }
+}
 
+// ─── DOWNLOAD ALL AS ZIP ─────────────────────────────────
+async function generate(){
+  const btn=document.getElementById('genBtn');
+  btn.innerHTML='<span class="spin"></span>Generating ZIP…'; btn.disabled=true;
+  hideSt('genSt');
+  try{
+    const poData=getPoData();
+    const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
+    const ppWt=parseFloat(document.getElementById('ppWt').value)||0.1;
+    const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
     const zip=new JSZip();
     const packLD=[];
-
-    for(let i=0;i<n;i++){
-      const loc={...parsedData.locations[i]};
-      const addrRaw=(document.getElementById('addr_'+i)?.value||'').split('\n');
-      while(addrRaw.length<3) addrRaw.push('');
-      loc.gstin=document.getElementById('bg_'+i)?.value||loc.gstin;
-      loc.address_lines=addrRaw;
-
-      const items={};
-      SIZES.forEach(sz=>{const el=document.getElementById('qty_'+i+'_'+sz);if(el) items[sz]=parseInt(el.value)||0;});
-      const invNum=document.getElementById('inv_'+i)?.value||'';
-      const ds=document.getElementById('ds_'+i)?.value||'';
-      const lr=document.getElementById('lr_'+i)?.value||'';
-      const mv=document.getElementById('mv_'+i)?.value||'';
-      const mt=document.getElementById('tr_'+i)?.value||'';
-
+    for(let i=0;i<parsedData.locations.length;i++){
+      const {loc,items,invNum,ds,lr,mv,mt}=getLocData(i);
       const cartons=distributeCartons(items,poData.prepackRatio,maxPcs);
       const b64=makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
       zip.file('Invoice_'+(invNum.replace(/\//g,'_')||loc.gstin)+'.xlsx',b64,{base64:true});
       packLD.push({location:loc,items,invNum});
     }
-
     const packB64=makePackingList(packLD,poData,maxPcs,ppWt,boxWt);
     zip.file('PackingList_'+poData.poNumber+'.xlsx',packB64,{base64:true});
-
     const blob=await zip.generateAsync({type:'blob'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     a.href=url; a.download='PO_'+poData.poNumber+'_Documents.zip';
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
-    showSt('genSt','✅ Downloaded successfully!','ok');
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    showSt('genSt','✅ All files downloaded as ZIP!','ok');
   }catch(e){
     showSt('genSt','❌ '+e.message,'err'); console.error(e);
   }finally{
-    btn.innerHTML='⚡ Generate Invoices & Packing List'; btn.disabled=false;
+    btn.innerHTML='📦 Download All as ZIP'; btn.disabled=false;
   }
 }
 </script>
