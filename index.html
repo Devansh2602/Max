@@ -182,24 +182,53 @@ async function parsePOPDF(file){
   // Full text for simple regex extraction
   const fullText = allPages.map(pg=>pg.map(i=>i.t).join('\n')).join('\n');
 
+  // Space-flattened full text (better for regex across split items)
+  const fullFlat = allPages.map(pg=>pg.map(i=>i.t).join(' ')).join(' ');
+
   // Basic fields
   let m;
   m=fullText.match(/Order No:\s*(\d+)/); if(m) result.poNumber=m[1];
   m=fullText.match(/Order Date:\s*(\S+)/); if(m) result.orderDate=m[1];
-  m=fullText.match(/UTEKS\n([A-Z]\d+[A-Z0-9]*)/); if(m) result.styleNo='UTEKS'+m[1];
-  else{m=fullText.replace(/\n/g,'').match(/UTEKS([A-Z]\d+[A-Z0-9]+)/); if(m) result.styleNo='UTEKS'+m[1];}
   m=fullText.match(/(\d{5})\n0{3}/); if(m) result.hsn=m[1]+'000';
   if(fullText.includes('OFF WHITE')) result.colour='OFF WHITE';
 
-  // Prepack ratio from pack table near end of PDF
-  const ratioMatches=[...fullText.matchAll(/KINARA\s+\d{13}\s+\S+\s+(S|M|L|XL|XXL)\s+(\d+)/g)];
-  if(ratioMatches.length){const r={};for(const mm of ratioMatches) r[mm[1]]=parseInt(mm[2]);result.prepackRatio=r;}
+  // ── Dynamic rate + MRP: find the two most-frequent X.00 prices in item rows ──
+  const priceFreq={};
+  for(const [,p] of fullText.matchAll(/\b(\d{3,4})\.00\b/g)){
+    const n=parseInt(p); if(n>=100&&n<=5000) priceFreq[n]=(priceFreq[n]||0)+1;
+  }
+  const sortedPrices=[...new Set(Object.entries(priceFreq).sort((a,b)=>b[1]-a[1]).map(([v])=>parseInt(v)))].slice(0,2).sort((a,b)=>a-b);
+  if(sortedPrices.length>=2){result.rate=sortedPrices[0];result.mrp=sortedPrices[1];}
+  else if(sortedPrices.length===1) result.rate=sortedPrices[0];
 
-  // Article numbers (13-digit codes)
-  const codes=[...fullText.replace(/\n/g,'').matchAll(/100001\d{7}/g)].map(mm=>mm[0]);
-  for(const c of new Set(codes)){
-    if(c.includes('16638')) result.prepackArticle=c;
-    else if(c.includes('16637')) result.singleArticlePrefix=c.slice(0,10);
+  // ── Style no: match UT[2-4 letters] followed by alphanumeric code ──
+  m=fullText.match(/UT([A-Z]{2,4})\n([A-Z]\d+[A-Z0-9]*)/);
+  if(m) result.styleNo='UT'+m[1]+m[2];
+  else {m=fullFlat.match(/UT([A-Z]{2,4})\s([A-Z]\d+[A-Z0-9]+)/); if(m) result.styleNo='UT'+m[1]+m[2];}
+
+  // ── Item description: Short Desc column — appears as [word] between "EA" and "N/Y [rate]" ──
+  m=fullFlat.match(/EA\s+([A-Z]{4,8})\s+[NY]\s+\d{3}/);
+  if(m) result.itemDesc=m[1];
+
+  // ── Prepack ratio from pack breakdown table at end of PDF ──
+  // Pattern: "[desc] [13digit-SKU] [style:size] [ratio]"  e.g. "KINARA 1000016637621 UTEKSU26KR:OFF WHITE:L 2"
+  const ratioMatches=[...fullFlat.matchAll(/\b(\d{13})\s+\S+\s+(S|M|L|XL|XXL|2XL|3XL)\s+(\d+)/g)];
+  if(ratioMatches.length){
+    const r={};
+    for(const mm of ratioMatches) r[mm[2]]=parseInt(mm[3]);
+    if(Object.keys(r).length>=2) result.prepackRatio=r;
+  }
+
+  // ── Article numbers: all 13-digit codes starting with 10000 ──
+  const codesRaw=[...fullFlat.matchAll(/\b(10000\d{8})\b/g)].map(mm=>mm[1]);
+  const codesSet=new Set(codesRaw);
+  // Partition: codes with PackInd=Y context → prepack; others → single
+  // Simpler: codes ending in non-standard size suffix → prepack
+  const sizeSuffixes=new Set(['621','623','625','627','629','911','913','915','917','919','921','923','925','927','929']);
+  for(const c of codesSet){
+    const sfx=c.slice(-3);
+    if(!sizeSuffixes.has(sfx)) result.prepackArticle=c;
+    else { result.singleArticlePrefix=c.slice(0,10); }
   }
 
   // ─── Location + quantity extraction ───
@@ -216,25 +245,25 @@ async function parsePOPDF(file){
     const sorted = [...pgItems].sort((a,b)=>b.y-a.y||a.x-b.x);
     const pgText = sorted.map(i=>i.t).join('\n');
 
-    // Find any new LOCATION: header on this page
-    const locMs=[...pgText.matchAll(/LOCATION:([^\n]+?)\s+GSTIN:([A-Z0-9]{15})/g)];
+    // ── Location detection: use space-joined text for reliable regex ──
+    const pgFlat = sorted.map(i=>i.t).join(' ');
+    const locMs=[...pgFlat.matchAll(/LOCATION:\s*([\w\s\-\.]+?)\s+GSTIN:\s*([A-Z0-9]{15})/g)];
     for(const lm of locMs){
       const gstin=lm[2].trim(), name=lm[1].trim();
       if(!locsSeen[gstin]){
         locsSeen[gstin]={name, gstin, items:{}};
         locsOrder.push(gstin);
       }
-      // Update curGSTIN only after processing tables above this header
-      // (handled below via y-position comparison)
     }
 
-    // Build a list of (y_position, gstin) for location headers on this page
+    // Build y-position map for location headers (wider tolerance = 20px)
     const locHeaderYs=[];
-    for(const it of sorted){
-      if(it.t.startsWith('LOCATION:')||it.t==='LOCATION:'){
-        // Find the GSTIN from nearby items (same y)
-        const nearby=sorted.filter(x=>Math.abs(x.y-it.y)<5).map(x=>x.t).join(' ');
-        const gm=nearby.match(/GSTIN:([A-Z0-9]{15})/);
+    for(let i=0;i<sorted.length;i++){
+      const it=sorted[i];
+      if(it.t.includes('LOCATION:')||it.t==='LOCATION:'){
+        // Scan next 50 items for GSTIN: (handles any layout split)
+        const ctx=sorted.slice(i,i+50).map(x=>x.t).join(' ');
+        const gm=ctx.match(/GSTIN:\s*([A-Z0-9]{15})/);
         if(gm) locHeaderYs.push({y:it.y, gstin:gm[1]});
       }
     }
@@ -280,11 +309,11 @@ async function parsePOPDF(file){
         if(MAP[sfx]) size=MAP[sfx];
         else if(itemCodeBuf.includes('16638')) size='PREPACK';
       }
-      if(!size){inItem=false;return;}
+      // If no size found in description → it's a prepack
+      if(!size) size='PREPACK';
 
-      // Extract qty from afterCostBuf
-      // Find first token matching "[digits]." = start of TotUnitVal
-      const qty=extractQty(afterCostBuf, parseFloat(document.getElementById('rate').value)||255);
+      // Extract qty using the rate we detected from the PDF
+      const qty=extractQty(afterCostBuf, result.rate);
       if(qty>0){
         if(!locsSeen[itemGSTIN]) locsSeen[itemGSTIN]={name:'Unknown',gstin:itemGSTIN,items:{}};
         if(!locsSeen[itemGSTIN].items[size]) // only first occurrence per size per location
@@ -297,34 +326,28 @@ async function parsePOPDF(file){
       const band=yGroups[yk];
       const bandText=band.map(i=>i.t).join(' ');
 
-      // Check if this band contains item code fragments
-      if(/\b10000\b|\b16637\b|\b16638\b|\b62063\b/.test(bandText)){
-        // New item row starting
-        if(inItem && !bandText.includes('16637') && !bandText.includes('16638')) {
-          // continuation of previous item
-        } else {
-          if(inItem) finaliseItem();
-          inItem=true;
-          itemY=yk;
-          itemGSTIN=gstinAtY(yk)||curGSTIN;
-          itemCodeBuf=bandText.replace(/\s/g,'');
-          descBuf=bandText;
-          // Check pack indicator
-          if(/\bY\b/.test(bandText)&&/16638/.test(bandText.replace(/\s/g,''))) packInd='Y';
-          else packInd='N';
-          afterCostBuf=[];
-        }
+      // Item code fragment: "10000" always starts a 13-digit Lifestyle SKU
+      const hasItemCode=/\b10000\b/.test(bandText);
+      if(hasItemCode){
+        if(inItem) finaliseItem();
+        inItem=true;
+        itemY=yk;
+        itemGSTIN=gstinAtY(yk)||curGSTIN;
+        itemCodeBuf=bandText.replace(/\s/g,'');
+        descBuf=bandText;
+        packInd='N'; // reset; prepack detected later via missing size
+        afterCostBuf=[];
       } else if(inItem){
-        // Continuation bands: accumulate description and post-cost numbers
         descBuf+=' '+bandText;
         itemCodeBuf+=bandText.replace(/\s/g,'');
-        // After "255.00" appears, collect numeric tokens
-        if(bandText.includes('255.00')||afterCostBuf.length>0){
-          // extract tokens from this band
+        // After the unit-cost-after-disc value appears, start collecting qty tokens
+        // The cost appears as "[rate].00" — use the rate we detected
+        const rateStr=result.rate.toFixed(2);
+        if(bandText.includes(rateStr)||afterCostBuf.length>0){
           const toks=band.map(i=>i.t);
           let pastCost=afterCostBuf.length>0;
           for(const tk of toks){
-            if(tk==='255.00') pastCost=true;
+            if(tk===rateStr) pastCost=true;
             else if(pastCost) afterCostBuf.push(tk);
           }
         }
@@ -399,26 +422,26 @@ function extractQty(tokens, rate){
 }
 
 function extractByRegex(fullText, gstin, items, rate){
-  // Find the section for this gstin
-  const gIdx=fullText.indexOf(gstin);
-  if(gIdx<0) return;
-  const nextGIdx=fullText.indexOf('GSTIN:', gIdx+10);
-  const section=fullText.slice(gIdx, nextGIdx>0?nextGIdx:gIdx+5000);
+  // Locate this gstin's section in the text
+  const gIdx=fullText.indexOf(gstin); if(gIdx<0) return;
+  const nextGIdx=fullText.indexOf('GSTIN:', gIdx+20);
+  const section=fullText.slice(gIdx, nextGIdx>0?nextGIdx:gIdx+8000);
+  const rateStr=rate.toFixed(2); // e.g. "260.00"
 
-  const SIZE_CODES={'621':'L','623':'M','625':'S','627':'XL','629':'XXL'};
-  for(const [code,size] of Object.entries(SIZE_CODES)){
+  // For each size: look for "WHITE: [SIZE]" or "WHITE:\n[SIZE]" then find the cost+qty pattern
+  for(const size of ['L','M','S','XL','XXL']){
     if(items[size]) continue;
-    // Look for "16637[code]" in section
-    const codePattern=new RegExp('16637\\s*'+code+'[\\s\\S]{0,400}?255\\.00','');
-    const cM=section.match(codePattern);
+    const sizePattern=new RegExp('WHITE[:\\s]+'+size+'\\b[\\s\\S]{0,600}?'+rateStr.replace('.','\\.'),'');
+    const cM=section.match(sizePattern);
     if(!cM) continue;
     const afterSection=section.slice(section.indexOf(cM[0])+cM[0].length);
     const qty=extractFromSection(afterSection, rate);
     if(qty>0) items[size]=qty;
   }
-  // Prepack
+  // Prepack: look for 10000 + Y (PackInd) near the rate, with no size label
   if(!items['PREPACK']){
-    const ppM=section.match(/16638[\s\S]{0,400}?255\.00/);
+    // Prepack rows have no "WHITE: [SIZE]" but do have the rate
+    const ppM=section.match(new RegExp('10000[\\s\\S]{0,50}?\\bY\\b[\\s\\S]{0,200}?'+rateStr.replace('.','\\.')));
     if(ppM){
       const afterSection=section.slice(section.indexOf(ppM[0])+ppM[0].length);
       const qty=extractFromSection(afterSection, rate);
