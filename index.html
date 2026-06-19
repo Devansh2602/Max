@@ -254,6 +254,35 @@ async function parsePOPDF(file){
   const locsOrder = [];
   let curGSTIN = null;
 
+  // Item-tracking state lives OUTSIDE the page loop so items that span page boundaries
+  // are handled correctly (size label may be on the next page after the quantity data)
+  let inItem=false, itemCodeBuf='', descBuf='', afterCostBuf=[], itemY=0, itemGSTIN=null;
+  let isPrepackItem=false; // set from Pack Ind "Y" in first band; avoids descBuf regex for prepack
+
+  const finaliseItem=(forcedSize=null)=>{
+    if(!inItem||!itemGSTIN) return;
+    let size=forcedSize;
+    if(!size){
+      if(isPrepackItem){
+        // Pack Ind = "Y" detected at item start — this is definitely a prepack
+        size='PREPACK';
+      } else {
+        // Single-size item: find size in descBuf
+        // {2,50}? prevents "WHITE:L" (pack-ratio, 1 char) from matching;
+        // "WHITE: 62 2 25 L" (actual desc, 2+ chars) is fine
+        const dm=descBuf.match(/WHITE[\s\S]{2,50}?\b(XXL|XL|2XL|3XL|S|M|L)\b/i);
+        if(dm) size=dm[1].toUpperCase(); else size='PREPACK';
+      }
+    }
+    const qty=extractQty(afterCostBuf, result.rate);
+    if(qty>0){
+      if(!locsSeen[itemGSTIN]) locsSeen[itemGSTIN]={name:'Unknown',gstin:itemGSTIN,items:{}};
+      if(!locsSeen[itemGSTIN].items[size])
+        locsSeen[itemGSTIN].items[size]=qty;
+    }
+    inItem=false; itemCodeBuf=''; descBuf=''; afterCostBuf=[]; isPrepackItem=false;
+  };
+
   for(const pgItems of allPages){
     // Sort top-to-bottom, left-to-right (PDF y=0 is bottom, so higher y = higher on page)
     const sorted = [...pgItems].sort((a,b)=>b.y-a.y||a.x-b.x);
@@ -304,37 +333,7 @@ async function parsePOPDF(file){
     // Scan through y groups top-to-bottom
     const yKeys=Object.keys(yGroups).map(Number).sort((a,b)=>b-a);
 
-    // Collect text per y-band, tracking "item blocks"
-    // An item block starts when we see item code fragments (16637xxx)
-    let itemCodeBuf='', descBuf='', packInd='', afterCostBuf=[];
-    let inItem=false, itemY=0, itemGSTIN=null;
-
-    const finaliseItem=()=>{
-      if(!inItem||!itemGSTIN) return;
-      // Determine size from descBuf
-      let size=null;
-      const dm=descBuf.match(/WHITE[:\s]*(XXL|XL|2XL|3XL|S|M|L)\b/i);
-      if(dm) size=dm[1].toUpperCase();
-      else if(packInd==='Y') size='PREPACK';
-      else{
-        // try item code suffix
-        const sfx=itemCodeBuf.replace(/\D/g,'').slice(-3);
-        const MAP={'621':'L','623':'M','625':'S','627':'XL','629':'XXL'};
-        if(MAP[sfx]) size=MAP[sfx];
-        else if(itemCodeBuf.includes('16638')) size='PREPACK';
-      }
-      // If no size found in description → it's a prepack
-      if(!size) size='PREPACK';
-
-      // Extract qty using the rate we detected from the PDF
-      const qty=extractQty(afterCostBuf, result.rate);
-      if(qty>0){
-        if(!locsSeen[itemGSTIN]) locsSeen[itemGSTIN]={name:'Unknown',gstin:itemGSTIN,items:{}};
-        if(!locsSeen[itemGSTIN].items[size]) // only first occurrence per size per location
-          locsSeen[itemGSTIN].items[size]=qty;
-      }
-      inItem=false; itemCodeBuf=''; descBuf=''; packInd=''; afterCostBuf=[];
-    };
+    // y-band scan — item state (inItem/descBuf/etc) persists across pages
 
     for(const yk of yKeys){
       const band=yGroups[yk];
@@ -351,8 +350,10 @@ async function parsePOPDF(file){
         itemGSTIN=gstinAtY(yk)||curGSTIN;
         itemCodeBuf=bandText.replace(/\s/g,'');
         descBuf=bandText;
-        packInd='N';
         afterCostBuf=[];
+        // Detect prepack: Pack Ind "Y" appears as standalone " Y " before the unit cost
+        const beforeRate=rateStr&&bandText.includes(rateStr)?bandText.slice(0,bandText.indexOf(rateStr)):bandText;
+        isPrepackItem=/\s+Y\s+/.test(beforeRate)||/^Y\s/.test(beforeRate.trim());
         // CRITICAL: rate + qty tokens appear on the SAME first line as "10000"
         // Collect them right away — don't wait for continuation bands
         if(bandText.includes(rateStr)){
@@ -366,14 +367,17 @@ async function parsePOPDF(file){
       } else if(inItem){
         descBuf+=' '+bandText;
         itemCodeBuf+=bandText.replace(/\s/g,'');
-        // Continuation bands: collect any remaining qty fragments
-        // (handles large numbers like 1194 split as "119" on line1 + "4" on line2)
+        // Continuation bands: only append tokens if we haven't found totVal yet
+        // (totVal = first 5+ digit number; once found we have all we need)
+        // This prevents "16637" from the item code continuation being misread as totVal
         if(afterCostBuf.length>0){
-          band.map(i=>i.t).forEach(tk=>afterCostBuf.push(tk));
+          const hasTotVal=afterCostBuf.some(t=>/^\d{5,}/.test(t));
+          if(!hasTotVal) band.map(i=>i.t).forEach(tk=>afterCostBuf.push(tk));
         }
-        // Finalise on size label (size always appears in its own band at the end)
-        if(/\b(S|M|L|XL|XXL|2XL|3XL)\b/.test(bandText)&&/WHITE/i.test(descBuf)){
-          finaliseItem();
+        // Finalise on size label — band must be EXACTLY the size (prevents pack-ratio table "WHITE:L 2" matching)
+        const szM=bandText.trim().match(/^(XXL|XL|2XL|3XL|S|M|L)$/i);
+        if(szM&&/WHITE/i.test(descBuf)){
+          finaliseItem(szM[1].toUpperCase());
         }
       }
 
@@ -382,11 +386,12 @@ async function parsePOPDF(file){
         if(Math.abs(lh.y-yk)<5) curGSTIN=lh.gstin;
       }
     }
-    if(inItem) finaliseItem();
-
-    // Update curGSTIN to last header on this page
+    // DO NOT finalise here — item may continue on next page (size label may be first band there)
+    // Update curGSTIN to last location seen on this page
     if(locHeaderYs.length) curGSTIN=locHeaderYs[locHeaderYs.length-1].gstin;
   }
+  // Finalise any item still open after all pages
+  if(inItem) finaliseItem();
 
   // Fallback: try simpler regex-based extraction on full text
   // For each location section, extract quantities using qty=TotUnitVal/rate
