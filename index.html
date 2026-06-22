@@ -1447,7 +1447,7 @@ async function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,mod
   // Post-process: strip <v></v> from header border-only cells
   // Turns <c r="B11" s="4" t="str"><v></v></c>  →  <c r="B11" s="4"/>
   // Excel then renders the border but allows text to overflow from adjacent cells
-  const zip2=await JSZip.loadAsync(atob(rawB64),{binary:true});
+  const zip2=await JSZip.loadAsync(rawB64,{base64:true});
   let shXml=await zip2.file('xl/worksheets/sheet1.xml').async('text');
   for(const addr of headerBorderCells){
     shXml=shXml.replace(
@@ -1664,7 +1664,7 @@ async function downloadInvoice(idx){
     const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
     const {loc,items,invNum,ds,lr,mv,mt}=getLocData(idx);
     const cartons=distributeCartons(items,poData.prepackRatio,maxPcs);
-    const b64=makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
+    const b64=await makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
     const fname='Invoice_'+(invNum.replace(/\//g,'_')||loc.gstin||'loc'+idx)+'.xlsx';
     triggerDownload(b64,fname);
     stEl.textContent='✅ Downloaded';
@@ -1716,7 +1716,7 @@ async function generate(){
     for(let i=0;i<parsedData.locations.length;i++){
       const {loc,items,invNum,ds,lr,mv,mt}=getLocData(i);
       const cartons=distributeCartons(items,poData.prepackRatio,maxPcs);
-      const b64=makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
+      const b64=await makeInvoice(loc,items,poData,invNum,ds,lr,mv,mt,'',cartons.length);
       zip.file('Invoice_'+(invNum.replace(/\//g,'_')||loc.gstin)+'.xlsx',b64,{base64:true});
       packLD.push({location:loc,items,invNum});
     }
