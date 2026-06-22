@@ -1348,8 +1348,16 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
   for(let r=range.s.r;r<=range.e.r;r++)
     for(let c=range.s.c;c<=range.e.c;c++){
       const a=XLSX.utils.encode_cell({r,c});
-      if(!ws[a]) ws[a]={v:'',t:'s'};
-      ws[a].s=cellSty(r,c);
+      const bds=INV_BORDERS[r+','+c];
+      const hasBorder=bds&&bds.some(v=>v>0);
+      if(ws[a]){
+        // Cell already exists in template — apply style, preserve value
+        ws[a].s=cellSty(r,c);
+      } else if(hasBorder){
+        // No value but needs border styling — create empty cell
+        ws[a]={v:'',t:'s',s:cellSty(r,c)};
+      }
+      // If no value AND no border: skip entirely → allows text overflow from adjacent cells
     }
 
   // ── Update specific data cells ──
