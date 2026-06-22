@@ -731,15 +731,21 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
   set('M30',intra?0:igst,'#,##0.00');
   set('D31',amtWords(bill)); set('M32',adj||0,'#,##0.00'); set('M33',bill,'#,##0.00');
 
-  // SheetJS doesn't preserve !cols when converting XLS→XLSX — set exact values from each template
-  // (each location template has slightly different widths — measured with xlrd)
+  // SheetJS doesn't preserve !cols / !rows when converting XLS→XLSX — set explicitly from template
   const INV_COLS={
-    '27AAACL2937J1ZE':[15.18,15.73,14.00,12.27,20.82,17.54,13.18,11.27,11.54,12.45,6.82,11.73,12.45],// BHI
-    '09AAACL2937J1ZC':[11.27,15.73,14.82,12.73,20.54,17.73,13.18,11.27,12.82,12.45,6.82,11.45,12.45],// GAZ
-    '19AAACL2937J1ZB':[10.45,15.73,13.00,11.73,19.82,15.54,12.54,11.27,12.82,11.82,6.82,11.82,12.45],// KOL
-    '29AAACL2937J1ZA':[10.54,15.73,14.82, 9.54,17.82,18.73,13.18,11.27,12.82,12.45,6.82,11.73,13.00],// SOU
+    '27AAACL2937J1ZE':[15.18,15.73,14.00,12.27,20.82,17.54,13.18,11.27,11.54,12.45,6.82,11.73,12.45],
+    '09AAACL2937J1ZC':[11.27,15.73,14.82,12.73,20.54,17.73,13.18,11.27,12.82,12.45,6.82,11.45,12.45],
+    '19AAACL2937J1ZB':[10.45,15.73,13.00,11.73,19.82,15.54,12.54,11.27,12.82,11.82,6.82,11.82,12.45],
+    '29AAACL2937J1ZA':[10.54,15.73,14.82, 9.54,17.82,18.73,13.18,11.27,12.82,12.45,6.82,11.73,13.00],
   };
   ws['!cols']=(INV_COLS[gstin]||INV_COLS['27AAACL2937J1ZE']).map(w=>({wch:w}));
+
+  // Row heights: all 15pt except R2=22.5, R6=11.25, R19=26 (measured from template)
+  const rows44=Array.from({length:44},(_,i)=>({hpt:15}));
+  rows44[1]={hpt:22.5};  // R2: company name
+  rows44[5]={hpt:11.25}; // R6: spacer
+  rows44[18]={hpt:26};   // R19: column headers
+  ws['!rows']=rows44;
 
   return XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
 }
@@ -794,7 +800,7 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
     };
 
     // Update headers
-    set(3,off+3,PACKING_LOCATION_NAMES[gstin]||ld.location.name||'');
+    set(3,off+3,LOC_DISPLAY[gstin]||ld.location.name||'');
     set(4,off+3,poInv); set(4,off+12,order);
     set(5,off+3,style); set(5,off+12,packed);
     set(6,off+3,cartons.length+' CTN');
@@ -844,13 +850,24 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
     for(let r=newTotIdx;r<tmplTotIdx;r++)
       for(let c=0;c<18;c++){const a=enc(r,c);if(ws[a]){ws[a].v='';ws[a].t='s';}}
 
-    // Move totals row
+    // Move totals row (cells)
     if(newTotIdx!==tmplTotIdx){
       for(let c=0;c<18;c++){
         const src=enc(tmplTotIdx,c),dst=enc(newTotIdx,c);
         if(ws[src]){if(ws[dst]){ws[dst].v=ws[src].v;ws[dst].t=ws[src].t;}else ws[dst]=JSON.parse(JSON.stringify(ws[src]));}
       }
       for(let c=0;c<18;c++){const a=enc(tmplTotIdx,c);if(ws[a]){ws[a].v='';ws[a].t='s';}}
+
+      // Move totals row MERGES — remove old, add updated ones at new row
+      if(ws['!merges']){
+        ws['!merges']=ws['!merges']
+          .filter(mg=>!(mg.s.r===tmplTotIdx && mg.e.r===tmplTotIdx)) // remove old totals merges
+          .concat(
+            (ws['!merges']
+              .filter(mg=>mg.s.r===tmplTotIdx && mg.e.r===tmplTotIdx)
+              .map(mg=>({s:{r:newTotIdx,c:mg.s.c},e:{r:newTotIdx,c:mg.e.c}}))) // add at new row
+          );
+      }
     }
 
     // Update totals values
