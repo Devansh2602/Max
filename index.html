@@ -1357,10 +1357,11 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
       if(hasValue){
         // Real content — keep and apply style
         cell.s=cellSty(r,c);
-      } else if(hasBorder){
-        // No value but needs border — use empty string so SheetJS writes the cell (renders border)
-        // These border-only cells are in positions where no adjacent text needs to overflow
-        // (the overflow cells like B8-F8 have NO borders and were deleted above)
+      } else if(hasBorder && r>=18 && r<=32){
+        // Data section rows 19-33 (0-indexed 18-32): create border cells (no text overflow needed here)
+        ws[a]={v:'',t:'s',s:cellSty(r,c)};
+      } else if(hasBorder && (r>=33)){
+        // Footer/terms rows 34+: create border cells for structural borders
         ws[a]={v:'',t:'s',s:cellSty(r,c)};
       } else {
         // No value, no border — DELETE so text can overflow from adjacent cells
