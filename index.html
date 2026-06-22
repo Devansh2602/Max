@@ -1309,7 +1309,7 @@ const INV_BORDERS={
 };
 
 // ─── INVOICE GENERATOR (hybrid: template dims + applied styles) ──
-function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,transporter,numCartons){
+async function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,transporter,numCartons){
   const gstin=location.gstin||'';
   const wb=XLSX.read(TMPL_INV[gstin]||TMPL_INV_BHI,{type:'base64'});
   const ws=wb.Sheets['INV'];
@@ -1344,6 +1344,7 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
     return s;
   }
 
+  const headerBorderCells=new Set(); // border-only cells in rows 1-18 to strip <v> from later
   const range=XLSX.utils.decode_range(ws['!ref']||'A1:M44');
   for(let r=range.s.r;r<=range.e.r;r++)
     for(let c=range.s.c;c<=range.e.c;c++){
@@ -1357,12 +1358,12 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
       if(hasValue){
         // Real content — keep and apply style
         cell.s=cellSty(r,c);
-      } else if(hasBorder && r>=18 && r<=32){
-        // Data section rows 19-33 (0-indexed 18-32): create border cells (no text overflow needed here)
+      } else if(hasBorder){
+        // Create border cell — ALL border-only cells get v:'' so borders render
         ws[a]={v:'',t:'s',s:cellSty(r,c)};
-      } else if(hasBorder && (r>=33)){
-        // Footer/terms rows 34+: create border cells for structural borders
-        ws[a]={v:'',t:'s',s:cellSty(r,c)};
+        // Track header-section border-only cells for later XML stripping
+        // (removing <v></v> makes Excel allow text overflow while keeping borders)
+        if(r<18) headerBorderCells.add(a);
       } else {
         // No value, no border — DELETE so text can overflow from adjacent cells
         // (In original XLS these were ctype=6 "formatted blank" cells that allow overflow)
@@ -1440,7 +1441,22 @@ function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,modeT,tra
   rows44[18]={hpt:26};   // R19: column headers
   ws['!rows']=rows44;
 
-  return XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
+  const rawB64=XLSX.write(wb,{bookType:'xlsx',type:'base64',cellStyles:true});
+  if(headerBorderCells.size===0) return rawB64;
+
+  // Post-process: strip <v></v> from header border-only cells
+  // Turns <c r="B11" s="4" t="str"><v></v></c>  →  <c r="B11" s="4"/>
+  // Excel then renders the border but allows text to overflow from adjacent cells
+  const zip2=await JSZip.loadAsync(atob(rawB64),{binary:true});
+  let shXml=await zip2.file('xl/worksheets/sheet1.xml').async('text');
+  for(const addr of headerBorderCells){
+    shXml=shXml.replace(
+      new RegExp(`<c r="${addr}" s="(\\d+)" t="str"><v><\\/v><\/c>`,'g'),
+      `<c r="${addr}" s="$1"/>`
+    );
+  }
+  zip2.file('xl/worksheets/sheet1.xml',shXml);
+  return zip2.generateAsync({type:'base64'});
 }
 
 // ─── PACKING LIST GENERATOR (hybrid: template dims + applied styles) ──
