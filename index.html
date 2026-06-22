@@ -1375,6 +1375,7 @@ async function makeInvoice(location,items,poData,invNum,dateSupply,lrNo,mvNo,mod
   const set=(a,v,fmt)=>{
     if(!ws[a]) ws[a]={};
     const n=typeof v==='number'; ws[a].v=v; ws[a].t=n?'n':'s';
+    delete ws[a].f; // clear any formula — prevents #VALUE! errors on recalculation
     if(fmt) ws[a].z=fmt;
     ws[a].s=ws[a].s||cellSty(XLSX.utils.decode_cell(a).r, XLSX.utils.decode_cell(a).c);
   };
