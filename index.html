@@ -1700,8 +1700,11 @@ async function makeStickers(locsData,poData,selectedGstins,maxPcs,ppWt,boxWt){
         for(let c=0;c<15;c++){
           const sa=XLSX.utils.encode_cell({r,c});
           const da=XLSX.utils.encode_cell({r:off+r,c});
-          if(tmplWs[sa]){ws[da]=JSON.parse(JSON.stringify(tmplWs[sa]));delete ws[da].f;}
-          else ws[da]={v:'',t:'s'};
+          if(tmplWs[sa]){
+            ws[da]=JSON.parse(JSON.stringify(tmplWs[sa]));delete ws[da].f;
+            // t:'z' = stub (merge continuation) — SheetJS never writes these; convert to writable
+            if(ws[da].t==='z'){ws[da].v=' ';ws[da].t='str';}
+          } else ws[da]={v:' ',t:'str'};
           // Apply exact border+font style from Python-extracted maps
           const bds=STK_BORDERS[r+','+c]||[0,0,0,0];
           const border={};
