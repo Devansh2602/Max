@@ -1582,12 +1582,17 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
         else ws[dst]=cell;
       }
     }
-    // Clear the original totals row position (only if it moved) — also delete formulas
-    if(newTotIdx!==tmplTotIdx){
-      for(let c=0;c<18;c++){
-        const a=enc(tmplTotIdx,c);
-        if(ws[a]){ws[a].v='';ws[a].t='s';delete ws[a].f;}
-      }
+    // Clear old rows only when FEWER cartons than template
+    // When MORE cartons: tmplTotIdx row was overwritten with carton data — DON'T clear it!
+    if(newTotIdx<tmplTotIdx){
+      for(let r=newTotIdx;r<=tmplTotIdx;r++)
+        for(let c=0;c<18;c++){
+          const a=enc(r,c);
+          if(ws[a]){ws[a].v='';ws[a].t='s';delete ws[a].f;}
+        }
+    } else if(newTotIdx===tmplTotIdx){
+      // Same position — just clear any leftover formula from the totals cells
+      for(let c=0;c<18;c++){const a=enc(tmplTotIdx,c);if(ws[a]) delete ws[a].f;}
     }
     // Update merges for totals row
     if(ws['!merges']){
