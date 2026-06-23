@@ -1554,7 +1554,7 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
       vals.forEach((val,vi)=>{
         const c=off+vi; const a=enc(r0,c);
         const n=typeof val==='number';
-        if(ws[a]){ws[a].v=val;ws[a].t=n?'n':'s';}
+        if(ws[a]){ws[a].v=val;ws[a].t=n?'n':'s';delete ws[a].f;} // clear any formula (e.g. totals row formula)
         else{
           ws[a]={v:val,t:n?'n':'s'};
           if(rowSty[c]) ws[a].s=JSON.parse(JSON.stringify(rowSty[c]));
