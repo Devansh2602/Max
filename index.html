@@ -103,18 +103,12 @@ table.sz input{width:80px;padding:4px 5px;border:1px solid var(--border);border-
   <div class="card-title">Step 5 — Download Files</div>
   <div id="genSt" class="status"></div>
   <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-    <button class="btn btn-green" id="dlPackBtn" onclick="downloadPacking()">
-      📋 Download Packing List
-    </button>
     <button class="btn btn-primary" id="genBtn" onclick="generate()">
       📦 Download All as ZIP
     </button>
-    <button class="btn btn-outline" id="dlStickerBtn" onclick="downloadStickers()" style="background:#fff;color:#7c3aed;border:2px solid #7c3aed">
-      🏷️ Download Carton Stickers
-    </button>
     <span style="color:var(--muted);font-size:12px">
       ZIP includes all invoices + packing list &nbsp;|&nbsp;
-      Use the buttons inside each location tab above to download invoices individually
+      Use the buttons inside each location tab for per-city downloads
     </span>
   </div>
 </div>
@@ -577,7 +571,13 @@ function buildTabs(locs){
         </tr></tfoot></table>
       <div class="dl-bar">
         <button class="btn btn-green" id="dlInvBtn_${idx}" onclick="downloadInvoice(${idx})">
-          📥 Download Invoice — ${loc.name||loc.gstin}
+          📥 Invoice
+        </button>
+        <button class="btn btn-green" id="dlPackLocBtn_${idx}" onclick="downloadPackingLoc(${idx})" style="background:#0e9f6e">
+          📋 Packing List
+        </button>
+        <button class="btn" id="dlStickerLocBtn_${idx}" onclick="downloadStickerLoc(${idx})" style="background:#fff;color:#7c3aed;border:2px solid #7c3aed;padding:9px 14px;font-size:13px">
+          🏷️ Carton Stickers
         </button>
         <span id="dlInvSt_${idx}" style="font-size:12px;color:var(--muted);align-self:center"></span>
       </div>`;
@@ -1863,6 +1863,47 @@ async function downloadPacking(){
   }finally{
     btn.innerHTML='📋 Download Packing List'; btn.disabled=false;
   }
+}
+
+// ─── DOWNLOAD PACKING LIST FOR ONE LOCATION ─────────────
+async function downloadPackingLoc(idx){
+  const btn=document.getElementById('dlPackLocBtn_'+idx);
+  const stEl=document.getElementById('dlInvSt_'+idx);
+  const orig=btn.innerHTML; btn.innerHTML='<span class="spin"></span>…'; btn.disabled=true;
+  stEl.textContent='';
+  try{
+    const poData=getPoData();
+    const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
+    const ppWt=parseFloat(document.getElementById('ppWt').value)||0.1;
+    const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
+    const {loc,items,invNum}=getLocData(idx);
+    const b64=makePackingList([{location:loc,items,invNum}],poData,maxPcs,ppWt,boxWt);
+    const locShort=(loc.name||'').split(' ').slice(-2).join('_')||'loc'+idx;
+    triggerDownload(b64,'PackingList_'+poData.poNumber+'_'+locShort+'.xlsx');
+    stEl.textContent='✅'; stEl.style.color='#057a55';
+  }catch(e){stEl.textContent='❌ '+e.message; stEl.style.color='#e02424'; console.error(e);}
+  finally{btn.innerHTML=orig; btn.disabled=false;}
+}
+
+// ─── DOWNLOAD STICKERS FOR ONE LOCATION ──────────────────
+async function downloadStickerLoc(idx){
+  const btn=document.getElementById('dlStickerLocBtn_'+idx);
+  const stEl=document.getElementById('dlInvSt_'+idx);
+  const orig=btn.innerHTML; btn.innerHTML='<span class="spin"></span>…'; btn.disabled=true;
+  stEl.textContent='';
+  try{
+    const poData=getPoData();
+    const maxPcs=parseInt(document.getElementById('maxPcs').value)||60;
+    const ppWt=parseFloat(document.getElementById('ppWt').value)||0.1;
+    const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
+    const {loc,items,invNum}=getLocData(idx);
+    const gstin=loc.gstin||'';
+    const b64=await makeStickers([{location:loc,items,invNum}],poData,[gstin],maxPcs,ppWt,boxWt);
+    const locShort=(loc.name||'').split(' ').slice(-2).join('_')||'loc'+idx;
+    triggerDownload(b64,'Stickers_'+poData.poNumber+'_'+locShort+'.xlsx');
+    stEl.textContent='✅'; stEl.style.color='#057a55';
+  }catch(e){stEl.textContent='❌ '+e.message; stEl.style.color='#e02424'; console.error(e);}
+  finally{btn.innerHTML=orig; btn.disabled=false;}
 }
 
 // ─── DOWNLOAD ALL AS ZIP ─────────────────────────────────
