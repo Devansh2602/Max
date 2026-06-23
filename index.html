@@ -1582,13 +1582,12 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
         else ws[dst]=cell;
       }
     }
-    // Clear old rows only when FEWER cartons than template
-    // When MORE cartons: tmplTotIdx row was overwritten with carton data — DON'T clear it!
+    // DELETE excess rows when FEWER cartons than template — must DELETE (not just clear to '')
+    // because cells with v='' still keep their border styles, creating visible empty grid
     if(newTotIdx<tmplTotIdx){
       for(let r=newTotIdx;r<=tmplTotIdx;r++)
         for(let c=0;c<18;c++){
-          const a=enc(r,c);
-          if(ws[a]){ws[a].v='';ws[a].t='s';delete ws[a].f;}
+          const a=enc(r,c); if(ws[a]) delete ws[a]; // delete entirely to remove borders
         }
     } else if(newTotIdx===tmplTotIdx){
       // Same position — just clear any leftover formula from the totals cells
