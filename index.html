@@ -1585,7 +1585,8 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
     // DELETE excess rows when FEWER cartons than template — must DELETE (not just clear to '')
     // because cells with v='' still keep their border styles, creating visible empty grid
     if(newTotIdx<tmplTotIdx){
-      for(let r=newTotIdx;r<=tmplTotIdx;r++)
+      // Start from newTotIdx+1 — newTotIdx is the NEW totals row, must NOT be deleted!
+      for(let r=newTotIdx+1;r<=tmplTotIdx;r++)
         for(let c=0;c<18;c++){
           const a=enc(r,c); if(ws[a]) delete ws[a]; // delete entirely to remove borders
         }
