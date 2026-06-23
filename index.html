@@ -1572,16 +1572,22 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
       for(let c=0;c<18;c++){const a=enc(r,c);if(ws[a]){ws[a].v='';ws[a].t='s';}}
 
     // Write totals row using savedTotals (NOT from ws[tmplTotIdx] which may be overwritten)
+    // Strip formulas (e.g. =SUM(L10:L41)) — they reference wrong range; we write direct values below
     for(let c=0;c<18;c++){
       const dst=enc(newTotIdx,c);
       if(savedTotals[c]){
-        if(ws[dst]){ws[dst].v=savedTotals[c].v;ws[dst].t=savedTotals[c].t;}
-        else ws[dst]=JSON.parse(JSON.stringify(savedTotals[c]));
+        const cell=JSON.parse(JSON.stringify(savedTotals[c]));
+        delete cell.f; // remove formula — prevents Excel from recalculating over our set() values
+        if(ws[dst]){ws[dst].v=cell.v;ws[dst].t=cell.t;delete ws[dst].f;}
+        else ws[dst]=cell;
       }
     }
-    // Clear the original totals row position (only if it moved)
+    // Clear the original totals row position (only if it moved) — also delete formulas
     if(newTotIdx!==tmplTotIdx){
-      for(let c=0;c<18;c++){const a=enc(tmplTotIdx,c);if(ws[a]){ws[a].v='';ws[a].t='s';}}
+      for(let c=0;c<18;c++){
+        const a=enc(tmplTotIdx,c);
+        if(ws[a]){ws[a].v='';ws[a].t='s';delete ws[a].f;}
+      }
     }
     // Update merges for totals row
     if(ws['!merges']){
