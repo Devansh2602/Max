@@ -1481,7 +1481,7 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
     const packed=cartons.reduce((a,c)=>a+c.total,0);
     const order=Object.values(ld.items).reduce((a,b)=>a+parseInt(b||0),0);
     const colour=poData.colour||'OFF WHITE';
-    const style=poData.styleNo?(poData.styleNo+'\n-'+colour):colour;
+    const style=poData.styleNo?(poData.styleNo+'-'+colour):colour; // single line — no newline to avoid taller row height
     const poInv=poData.poNumber+(ld.invNum?' / '+ld.invNum:'');
 
     // Apply styles to all existing cells
@@ -1601,10 +1601,9 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
         .concat(savedTotMerges.map(mg=>({s:{r:newTotIdx,c:mg.s.c},e:{r:newTotIdx,c:mg.e.c}})));
     }
 
-    // Remove O and P cells from all carton rows — they have no content/borders in template
-    // but SheetJS creates them with border styles as artifacts
+    // Remove O and P cells from ALL rows (header + carton) — SheetJS creates them as border artifacts
     const dataColCount=off+13; // BHI/SOUTH: cols 0-13 (A-N), GAZI/KOL: cols 0-12 (A-M)
-    for(let r=10;r<=newTotIdx;r++){
+    for(let r=0;r<=newTotIdx;r++){
       for(let c=dataColCount;c<18;c++){
         const a=enc(r,c); if(ws[a]) delete ws[a];
       }
