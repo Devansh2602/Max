@@ -1601,6 +1601,15 @@ function makePackingList(locsData,poData,maxPcs,ppWt,boxWt){
         .concat(savedTotMerges.map(mg=>({s:{r:newTotIdx,c:mg.s.c},e:{r:newTotIdx,c:mg.e.c}})));
     }
 
+    // Remove O and P cells from all carton rows — they have no content/borders in template
+    // but SheetJS creates them with border styles as artifacts
+    const dataColCount=off+13; // BHI/SOUTH: cols 0-13 (A-N), GAZI/KOL: cols 0-12 (A-M)
+    for(let r=10;r<=newTotIdx;r++){
+      for(let c=dataColCount;c<18;c++){
+        const a=enc(r,c); if(ws[a]) delete ws[a];
+      }
+    }
+
     // Update totals values
     const totNet=parseFloat(cartons.reduce((a,c)=>a+c.total*ppWt,0).toFixed(2));
     const totGross=parseFloat((totNet+cartons.length*boxWt).toFixed(2));
