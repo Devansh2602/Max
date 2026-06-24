@@ -1755,35 +1755,29 @@ async function makeStickers(locsData,poData,selectedGstins,maxPcs,ppWt,boxWt){
       const colour=poData.colour||'OFF WHITE';
 
       if(isPrepack){
-        // PREPACK: show one row per size — SINGLES = packing ratio per pack, MASTER BAG = pack count
-        // Remove the 2-row merge on rows 17-18 (only applicable for single-item cartons)
-        ws['!merges']=ws['!merges'].filter(m=>
-          !(m.s.r===off+17&&m.e.r===off+18&&m.s.c!==m.e.c));
-        const sizes=['S','M','L','XL','XXL'];
-        sizes.forEach((sz,itemIdx)=>{
-          const r=17+itemIdx; // rows 17-21 (one per size)
-          const ratioVal=ratio[sz]||0;
-          const totalForSize=ratioVal*ctn.pcs; // ratio × prepack_units
-          set(r,0,artMap[sz]||'');          // item code for this size
-          set(r,2,poData.styleNo||'');      // description
-          set(r,5,sz);                      // size
-          set(r,8,ratioVal);               // SINGLES = packing ratio (pcs of this size per pack)
-          set(r,10,colour);                // colour
-          set(r,11,ctn.pcs);              // MASTER BAG = number of prepacks in this carton
-          set(r,13,totalForSize);          // PCS IN MASTER BAG = ratio × packs
-          set(r,14,totalForSize);          // TOTAL PCS
-        });
+        // PREPACK: ONE ROW — SIZE = "S,M,L,XL,XXL", SINGLES = ratio values "2,2,2,1,1"
+        const szKeys=Object.keys(ratio).filter(s=>ratio[s]>0);
+        const sizeStr=szKeys.join(',');          // "S,M,L,XL,XXL"
+        const ratioStr=szKeys.map(s=>ratio[s]).join(','); // "2,2,2,1,1"
+        set(17,0,poData.prepackArticle||'');     // prepack item code
+        set(17,2,poData.styleNo||'');            // description
+        set(17,5,sizeStr);                       // SIZE = all sizes comma-joined
+        set(17,8,ratioStr);                      // SINGLES = ratio values comma-joined
+        set(17,10,colour);                       // colour
+        set(17,11,ctn.pcs);                     // MASTER BAG = number of prepacks in carton
+        set(17,13,ppc);                          // PCS IN MASTER BAG = pcs per prepack
+        set(17,14,ctn.total);                   // TOTAL PCS = packs × ppc
       } else {
         // SINGLE carton: one row (2-row merged block at rows 17-18)
         const sz=getCartonSize(ctn);
-        set(17,0,artMap[sz]||'');         // item code
-        set(17,2,poData.styleNo||'');     // description
-        set(17,5,sz);                     // size
-        set(17,8,ctn.total);             // SINGLES = total pcs
-        set(17,10,colour);               // colour
-        set(17,11,0);                    // no master bag
-        set(17,13,0);                    // no pcs in master bag
-        set(17,14,ctn.total);            // total pcs
+        set(17,0,artMap[sz]||'');               // item code for this size
+        set(17,2,poData.styleNo||'');           // description
+        set(17,5,sz);                           // size
+        set(17,8,ctn.total);                   // SINGLES = total pcs
+        set(17,10,colour);                      // colour
+        set(17,11,0);                           // no master bag
+        set(17,13,0);                           // no pcs in master bag
+        set(17,14,ctn.total);                  // total pcs
       }
     });
 
