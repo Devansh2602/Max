@@ -554,6 +554,7 @@ function buildTabs(locs){
     panel.innerHTML=`
       <div class="loc-grid">
         <div><label>Invoice Number <span style="color:#e02424">*</span></label><input type="text" id="inv_${idx}" placeholder="e.g. GS/029299" required style="border-color:var(--border)" oninput="this.style.borderColor=this.value.trim()?'var(--border)':'#e02424'"></div>
+        <div><label>Invoice Date</label><input type="text" id="invdt_${idx}" value="${today}" placeholder="DD.MM.YYYY"></div>
         <div><label>Date of Supply</label><input type="text" id="ds_${idx}" value="${today}"></div>
         <div><label>Buyer GSTIN</label><input type="text" id="bg_${idx}" value="${loc.gstin||''}"></div>
         <div><label>L.R No &amp; Date</label><input type="text" id="lr_${idx}"></div>
@@ -1734,7 +1735,7 @@ async function makeStickers(locsData,poData,selectedGstins,maxPcs,ppWt,boxWt){
       // Header data
       set(0,0,STICKER_LOC[gstin]||ld.location.name||''); // R1: location name
       set(0,13,ld.invNum||'');                            // R1: invoice#
-      set(2,13,'');                                       // R3: invoice date (blank)
+      set(2,13,ld.invDate||'');                           // R3: invoice date
       set(4,13,poData.poNumber||'');                      // R5: PO number
       set(6,13,poData.orderDate||'');                     // R7: PO date
       set(8,13,(poData.styleNo||'')+'\n'+(poData.colour||'')); // R9: style+colour
@@ -1805,8 +1806,8 @@ async function downloadStickers(){
     if(!selected.length){showSt('genSt','❌ Please select at least one location','err');return;}
     const packLD=[];
     for(let i=0;i<parsedData.locations.length;i++){
-      const {loc,items,invNum}=getLocData(i);
-      packLD.push({location:loc,items,invNum});
+      const {loc,items,invNum,invDate}=getLocData(i);
+      packLD.push({location:loc,items,invNum,invDate});
     }
     const b64=await makeStickers(packLD,poData,selected,maxPcs,ppWt,boxWt);
     triggerDownload(b64,'Stickers_'+poData.poNumber+'.xlsx');
@@ -1843,6 +1844,7 @@ function getLocData(i){
   return {
     loc, items,
     invNum:document.getElementById('inv_'+i)?.value||'',
+    invDate:document.getElementById('invdt_'+i)?.value||'',
     ds:document.getElementById('ds_'+i)?.value||'',
     lr:document.getElementById('lr_'+i)?.value||'',
     mv:document.getElementById('mv_'+i)?.value||'',
@@ -1956,7 +1958,7 @@ async function downloadStickerLoc(idx){
     const boxWt=parseFloat(document.getElementById('boxWt').value)||1.5;
     const {loc,items,invNum}=getLocData(idx);
     const gstin=loc.gstin||'';
-    const b64=await makeStickers([{location:loc,items,invNum}],poData,[gstin],maxPcs,ppWt,boxWt);
+    const b64=await makeStickers([{location:loc,items,invNum,invDate}],poData,[gstin],maxPcs,ppWt,boxWt);
     const locShort=(loc.name||'').split(' ').slice(-2).join('_')||'loc'+idx;
     triggerDownload(b64,'Stickers_'+poData.poNumber+'_'+locShort+'.xlsx');
     stEl.textContent='✅'; stEl.style.color='#057a55';
