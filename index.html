@@ -553,7 +553,7 @@ function buildTabs(locs){
     });
     panel.innerHTML=`
       <div class="loc-grid">
-        <div><label>Invoice Number</label><input type="text" id="inv_${idx}" placeholder="e.g. GS/029299"></div>
+        <div><label>Invoice Number <span style="color:#e02424">*</span></label><input type="text" id="inv_${idx}" placeholder="e.g. GS/029299" required style="border-color:var(--border)" oninput="this.style.borderColor=this.value.trim()?'var(--border)':'#e02424'"></div>
         <div><label>Date of Supply</label><input type="text" id="ds_${idx}" value="${today}"></div>
         <div><label>Buyer GSTIN</label><input type="text" id="bg_${idx}" value="${loc.gstin||''}"></div>
         <div><label>L.R No &amp; Date</label><input type="text" id="lr_${idx}"></div>
@@ -1859,7 +1859,21 @@ function triggerDownload(b64, filename){
 }
 
 // ─── DOWNLOAD ONE INVOICE ────────────────────────────────
+// Validate invoice number for a location — highlights field red and returns false if empty
+function requireInvNum(idx){
+  const el=document.getElementById('inv_'+idx);
+  if(!el||!el.value.trim()){
+    if(el){el.style.borderColor='#e02424';el.focus();}
+    const stEl=document.getElementById('dlInvSt_'+idx);
+    if(stEl){stEl.textContent='❌ Invoice number is required';stEl.style.color='#e02424';}
+    return false;
+  }
+  el.style.borderColor='var(--border)';
+  return true;
+}
+
 async function downloadInvoice(idx){
+  if(!requireInvNum(idx)) return;
   const btn=document.getElementById('dlInvBtn_'+idx);
   const stEl=document.getElementById('dlInvSt_'+idx);
   const origTxt=btn.innerHTML;
@@ -1909,6 +1923,7 @@ async function downloadPacking(){
 
 // ─── DOWNLOAD PACKING LIST FOR ONE LOCATION ─────────────
 async function downloadPackingLoc(idx){
+  if(!requireInvNum(idx)) return;
   const btn=document.getElementById('dlPackLocBtn_'+idx);
   const stEl=document.getElementById('dlInvSt_'+idx);
   const orig=btn.innerHTML; btn.innerHTML='<span class="spin"></span>…'; btn.disabled=true;
@@ -1929,6 +1944,7 @@ async function downloadPackingLoc(idx){
 
 // ─── DOWNLOAD STICKERS FOR ONE LOCATION ──────────────────
 async function downloadStickerLoc(idx){
+  if(!requireInvNum(idx)) return;
   const btn=document.getElementById('dlStickerLocBtn_'+idx);
   const stEl=document.getElementById('dlInvSt_'+idx);
   const orig=btn.innerHTML; btn.innerHTML='<span class="spin"></span>…'; btn.disabled=true;
@@ -1950,6 +1966,12 @@ async function downloadStickerLoc(idx){
 
 // ─── DOWNLOAD ALL AS ZIP ─────────────────────────────────
 async function generate(){
+  // Validate ALL invoice numbers before generating ZIP
+  let allValid=true;
+  for(let i=0;i<(parsedData?.locations?.length||0);i++){
+    if(!requireInvNum(i)) allValid=false;
+  }
+  if(!allValid){showSt('genSt','❌ Please fill invoice number for all locations','err');return;}
   const btn=document.getElementById('genBtn');
   btn.innerHTML='<span class="spin"></span>Generating ZIP…'; btn.disabled=true;
   hideSt('genSt');
